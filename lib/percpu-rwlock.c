@@ -102,6 +102,10 @@ void percpu_read_lock_irqsafe(struct percpu_rwlock *pcpu_rwlock)
 
 	if (likely(!writer_active(pcpu_rwlock))) {
 		this_cpu_inc(pcpu_rwlock->rw_state->reader_refcnt);
+
+		/* Pretend that we take global_rwlock for lockdep */
+		rwlock_acquire_read(&pcpu_rwlock->global_rwlock.dep_map,
+				    0, 0, _RET_IP_);
 	} else {
 		/* Writer is active, so switch to global rwlock. */
 
@@ -126,6 +130,12 @@ void percpu_read_lock_irqsafe(struct percpu_rwlock *pcpu_rwlock)
 		if (!writer_active(pcpu_rwlock)) {
 			this_cpu_inc(pcpu_rwlock->rw_state->reader_refcnt);
 			read_unlock(&pcpu_rwlock->global_rwlock);
+
+			/*
+			 * Pretend that we take global_rwlock for lockdep
+			 */
+			rwlock_acquire_read(&pcpu_rwlock->global_rwlock.dep_map,
+					    0, 0, _RET_IP_);
 		}
 	}
 
@@ -162,6 +172,13 @@ void percpu_read_unlock_irqsafe(struct percpu_rwlock *pcpu_rwlock)
 		 */
 		smp_mb();
 		this_cpu_dec(pcpu_rwlock->rw_state->reader_refcnt);
+
+		/*
+		 * Since this is the last decrement, it is time to pretend
+		 * to lockdep that we are releasing the read lock.
+		 */
+		rwlock_release(&pcpu_rwlock->global_rwlock.dep_map,
+			       1, _RET_IP_);
 	} else {
 		read_unlock(&pcpu_rwlock->global_rwlock);
 	}
@@ -200,12 +217,28 @@ void percpu_write_lock_irqsave(struct percpu_rwlock *pcpu_rwlock,
 
 	smp_mb(); /* Complete the wait-for-readers, before taking the lock */
 	write_lock_irqsave(&pcpu_rwlock->global_rwlock, *flags);
+
+	/*
+	 * It is desirable to allow the writer to acquire the percpu-rwlock
+	 * for read (if necessary), without deadlocking or getting complaints
+	 * from lockdep. To achieve that, just increment the reader_refcnt of
+	 * this CPU - that way, any attempt by the writer to acquire the
+	 * percpu-rwlock for read, will get treated as a case of nested percpu
+	 * reader, which is safe, from a locking perspective.
+	 */
+	this_cpu_inc(pcpu_rwlock->rw_state->reader_refcnt);
 }
 
 void percpu_write_unlock_irqrestore(struct percpu_rwlock *pcpu_rwlock,
 				    unsigned long *flags)
 {
 	unsigned int cpu;
+
+	/*
+	 * Undo the special increment that we had done in the write-lock path
+	 * in order to allow writers to be readers.
+	 */
+	this_cpu_dec(pcpu_rwlock->rw_state->reader_refcnt);
 
 	/* Complete the critical section before clearing ->writer_signal */
 	smp_mb();
