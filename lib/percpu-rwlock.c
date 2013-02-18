@@ -31,6 +31,10 @@
 int __percpu_init_rwlock(struct percpu_rwlock *pcpu_rwlock,
 			 const char *name, struct lock_class_key *rwlock_key)
 {
+	pcpu_rwlock->rw_state = alloc_percpu(struct rw_state);
+	if (unlikely(!pcpu_rwlock->rw_state))
+		return -ENOMEM;
+
 	/* ->global_rwlock represents the whole percpu_rwlock for lockdep */
 #ifdef CONFIG_DEBUG_SPINLOCK
 	__rwlock_init(&pcpu_rwlock->global_rwlock, name, rwlock_key);
@@ -39,6 +43,14 @@ int __percpu_init_rwlock(struct percpu_rwlock *pcpu_rwlock,
 			__RW_LOCK_UNLOCKED(&pcpu_rwlock->global_rwlock);
 #endif
 	return 0;
+}
+
+void percpu_free_rwlock(struct percpu_rwlock *pcpu_rwlock)
+{
+	free_percpu(pcpu_rwlock->rw_state);
+
+	/* Catch use-after-free bugs */
+	pcpu_rwlock->rw_state = NULL;
 }
 
 void percpu_read_lock(struct percpu_rwlock *pcpu_rwlock)

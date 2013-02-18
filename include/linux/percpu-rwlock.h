@@ -28,7 +28,13 @@
 #include <linux/lockdep.h>
 #include <linux/spinlock.h>
 
+struct rw_state {
+	unsigned long	reader_refcnt;
+	bool		writer_signal;
+};
+
 struct percpu_rwlock {
+	struct rw_state __percpu	*rw_state;
 	rwlock_t			global_rwlock;
 };
 
@@ -40,6 +46,8 @@ extern void percpu_write_unlock(struct percpu_rwlock *);
 
 extern int __percpu_init_rwlock(struct percpu_rwlock *,
 				const char *, struct lock_class_key *);
+
+extern void percpu_free_rwlock(struct percpu_rwlock *);
 
 #define percpu_init_rwlock(pcpu_rwlock)					\
 ({	static struct lock_class_key rwlock_key;			\
