@@ -80,21 +80,19 @@ void percpu_read_lock_irqsafe(struct percpu_rwlock *pcpu_rwlock)
 	preempt_disable();
 
 	/*
-	 * Let the writer know that a reader is active, even before we choose
-	 * our reader-side synchronization scheme.
-	 */
-	this_cpu_add(pcpu_rwlock->rw_state->reader_refcnt, READER_PRESENT);
-
-	/*
 	 * If we are already using per-cpu refcounts, it is not safe to switch
 	 * the synchronization scheme. So continue using the refcounts.
 	 */
 	if (reader_uses_percpu_refcnt(pcpu_rwlock)) {
 		this_cpu_inc(pcpu_rwlock->rw_state->reader_refcnt);
-		this_cpu_sub(pcpu_rwlock->rw_state->reader_refcnt,
-			     READER_PRESENT);
 		return;
 	}
+
+	/*
+	 * Let the writer know that a reader is active, even before we choose
+	 * our reader-side synchronization scheme.
+	 */
+	this_cpu_add(pcpu_rwlock->rw_state->reader_refcnt, READER_PRESENT);
 
 	/*
 	 * The write to 'reader_refcnt' must be visible before we read
