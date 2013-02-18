@@ -17,6 +17,7 @@
 #include <linux/module.h>
 #include <linux/notifier.h>
 #include <linux/smp.h>
+#include <linux/cpu.h>
 
 #include "tick-internal.h"
 
@@ -431,6 +432,7 @@ void clockevents_notify(unsigned long reason, void *arg)
 	unsigned long flags;
 	int cpu;
 
+	get_online_cpus_atomic();
 	raw_spin_lock_irqsave(&clockevents_lock, flags);
 	clockevents_do_notify(reason, arg);
 
@@ -459,6 +461,7 @@ void clockevents_notify(unsigned long reason, void *arg)
 		break;
 	}
 	raw_spin_unlock_irqrestore(&clockevents_lock, flags);
+	put_online_cpus_atomic();
 }
 EXPORT_SYMBOL_GPL(clockevents_notify);
 #endif
