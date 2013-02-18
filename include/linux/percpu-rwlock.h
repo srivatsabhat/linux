@@ -38,11 +38,13 @@ struct percpu_rwlock {
 	rwlock_t			global_rwlock;
 };
 
-extern void percpu_read_lock(struct percpu_rwlock *);
-extern void percpu_read_unlock(struct percpu_rwlock *);
+extern void percpu_read_lock_irqsafe(struct percpu_rwlock *);
+extern void percpu_read_unlock_irqsafe(struct percpu_rwlock *);
 
-extern void percpu_write_lock(struct percpu_rwlock *);
-extern void percpu_write_unlock(struct percpu_rwlock *);
+extern void percpu_write_lock_irqsave(struct percpu_rwlock *,
+				      unsigned long *flags);
+extern void percpu_write_unlock_irqrestore(struct percpu_rwlock *,
+					   unsigned long *flags);
 
 extern int __percpu_init_rwlock(struct percpu_rwlock *,
 				const char *, struct lock_class_key *);

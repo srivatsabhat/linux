@@ -30,11 +30,15 @@
 #include <asm/processor.h>
 
 
+#define READER_PRESENT		(1UL << 16)
+#define READER_REFCNT_MASK	(READER_PRESENT - 1)
+
 #define reader_yet_to_switch(pcpu_rwlock, cpu)				    \
 	(ACCESS_ONCE(per_cpu_ptr((pcpu_rwlock)->rw_state, cpu)->reader_refcnt))
 
-#define reader_percpu_nesting_depth(pcpu_rwlock)		  \
-	(__this_cpu_read((pcpu_rwlock)->rw_state->reader_refcnt))
+#define reader_percpu_nesting_depth(pcpu_rwlock)			\
+	(__this_cpu_read((pcpu_rwlock)->rw_state->reader_refcnt) &	\
+	 READER_REFCNT_MASK)
 
 #define reader_uses_percpu_refcnt(pcpu_rwlock)				\
 				reader_percpu_nesting_depth(pcpu_rwlock)
@@ -71,7 +75,7 @@ void percpu_free_rwlock(struct percpu_rwlock *pcpu_rwlock)
 	pcpu_rwlock->rw_state = NULL;
 }
 
-void percpu_read_lock(struct percpu_rwlock *pcpu_rwlock)
+void percpu_read_lock_irqsafe(struct percpu_rwlock *pcpu_rwlock)
 {
 	preempt_disable();
 
@@ -79,14 +83,18 @@ void percpu_read_lock(struct percpu_rwlock *pcpu_rwlock)
 	 * Let the writer know that a reader is active, even before we choose
 	 * our reader-side synchronization scheme.
 	 */
-	this_cpu_inc(pcpu_rwlock->rw_state->reader_refcnt);
+	this_cpu_add(pcpu_rwlock->rw_state->reader_refcnt, READER_PRESENT);
 
 	/*
 	 * If we are already using per-cpu refcounts, it is not safe to switch
 	 * the synchronization scheme. So continue using the refcounts.
 	 */
-	if (reader_nested_percpu(pcpu_rwlock))
+	if (reader_uses_percpu_refcnt(pcpu_rwlock)) {
+		this_cpu_inc(pcpu_rwlock->rw_state->reader_refcnt);
+		this_cpu_sub(pcpu_rwlock->rw_state->reader_refcnt,
+			     READER_PRESENT);
 		return;
+	}
 
 	/*
 	 * The write to 'reader_refcnt' must be visible before we read
@@ -95,9 +103,19 @@ void percpu_read_lock(struct percpu_rwlock *pcpu_rwlock)
 	smp_mb();
 
 	if (likely(!writer_active(pcpu_rwlock))) {
-		goto out;
+		this_cpu_inc(pcpu_rwlock->rw_state->reader_refcnt);
 	} else {
 		/* Writer is active, so switch to global rwlock. */
+
+		/*
+		 * While we are spinning on ->global_rwlock, an
+		 * interrupt can hit us, and the interrupt handler
+		 * might call this function. The distinction between
+		 * READER_PRESENT and the refcnt helps ensure that the
+		 * interrupt handler also takes this branch and spins
+		 * on the ->global_rwlock, as long as the writer is
+		 * active.
+		 */
 		read_lock(&pcpu_rwlock->global_rwlock);
 
 		/*
@@ -107,29 +125,24 @@ void percpu_read_lock(struct percpu_rwlock *pcpu_rwlock)
 		 * refcounts. (This also helps avoid heterogeneous nesting of
 		 * readers).
 		 */
-		if (writer_active(pcpu_rwlock)) {
-			/*
-			 * The above writer_active() check can get reordered
-			 * with this_cpu_dec() below, but this is OK, because
-			 * holding the rwlock is conservative.
-			 */
-			this_cpu_dec(pcpu_rwlock->rw_state->reader_refcnt);
-		} else {
+		if (!writer_active(pcpu_rwlock)) {
+			this_cpu_inc(pcpu_rwlock->rw_state->reader_refcnt);
 			read_unlock(&pcpu_rwlock->global_rwlock);
 		}
 	}
 
-out:
+	this_cpu_sub(pcpu_rwlock->rw_state->reader_refcnt, READER_PRESENT);
+
 	/* Prevent reordering of any subsequent reads/writes */
 	smp_mb();
 }
 
-void percpu_read_unlock(struct percpu_rwlock *pcpu_rwlock)
+void percpu_read_unlock_irqsafe(struct percpu_rwlock *pcpu_rwlock)
 {
 	/*
 	 * We never allow heterogeneous nesting of readers. So it is trivial
 	 * to find out the kind of reader we are, and undo the operation
-	 * done by our corresponding percpu_read_lock().
+	 * done by our corresponding percpu_read_lock_irqsafe().
 	 */
 
 	/* Try to fast-path: a nested percpu reader is the simplest case */
@@ -158,7 +171,8 @@ void percpu_read_unlock(struct percpu_rwlock *pcpu_rwlock)
 	preempt_enable();
 }
 
-void percpu_write_lock(struct percpu_rwlock *pcpu_rwlock)
+void percpu_write_lock_irqsave(struct percpu_rwlock *pcpu_rwlock,
+			       unsigned long *flags)
 {
 	unsigned int cpu;
 
@@ -187,10 +201,11 @@ void percpu_write_lock(struct percpu_rwlock *pcpu_rwlock)
 	}
 
 	smp_mb(); /* Complete the wait-for-readers, before taking the lock */
-	write_lock(&pcpu_rwlock->global_rwlock);
+	write_lock_irqsave(&pcpu_rwlock->global_rwlock, *flags);
 }
 
-void percpu_write_unlock(struct percpu_rwlock *pcpu_rwlock)
+void percpu_write_unlock_irqrestore(struct percpu_rwlock *pcpu_rwlock,
+				    unsigned long *flags)
 {
 	unsigned int cpu;
 
@@ -205,6 +220,6 @@ void percpu_write_unlock(struct percpu_rwlock *pcpu_rwlock)
 	for_each_possible_cpu(cpu)
 		per_cpu_ptr(pcpu_rwlock->rw_state, cpu)->writer_signal = false;
 
-	write_unlock(&pcpu_rwlock->global_rwlock);
+	write_unlock_irqrestore(&pcpu_rwlock->global_rwlock, *flags);
 }
 
