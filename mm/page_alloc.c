@@ -539,6 +539,15 @@ static void add_to_freelist(struct page *page, struct free_list *free_list)
 	/* This is the first region, so add to the head of the list */
 	prev_region_list = &free_list->list;
 
+#ifdef CONFIG_DEBUG_PAGEALLOC
+	WARN((list_empty(&free_list->list) && free_list->next_region != NULL),
+					"%s: next_region not NULL\n", __func__);
+#endif
+	/*
+	 * Set 'next_region' to this region, since this is the first region now
+	 */
+	free_list->next_region = region;
+
 out:
 	list_add(lru, prev_region_list);
 
@@ -546,6 +555,47 @@ out:
 	region->page_block = lru;
 }
 
+/**
+ * __rmqueue_smallest() *always* deletes elements from the head of the
+ * list. Use this knowledge to keep page allocation fast, despite being
+ * region-aware.
+ *
+ * Do *NOT* call this function if you are deleting from somewhere deep
+ * inside the freelist.
+ */
+static void rmqueue_del_from_freelist(struct page *page,
+				      struct free_list *free_list)
+{
+	struct list_head *lru = &page->lru;
+
+#ifdef CONFIG_DEBUG_PAGEALLOC
+	WARN((free_list->list.next != lru),
+				"%s: page not at head of list", __func__);
+#endif
+
+	list_del(lru);
+
+	/* Fastpath */
+	if (--(free_list->next_region->nr_free)) {
+
+#ifdef CONFIG_DEBUG_PAGEALLOC
+		WARN(free_list->next_region->nr_free < 0,
+				"%s: nr_free is negative\n", __func__);
+#endif
+		return;
+	}
+
+	/*
+	 * Slowpath, when this is the last pageblock of this region
+	 * in this freelist.
+	 */
+	free_list->next_region->page_block = NULL;
+
+	/* Set 'next_region' to the new first region in the freelist. */
+	set_next_region_in_freelist(free_list);
+}
+
+/* Generic delete function for region-aware buddy allocator. */
 static void del_from_freelist(struct page *page, struct free_list *free_list)
 {
 	struct list_head *prev_page_lru, *lru, *p;
@@ -553,6 +603,11 @@ static void del_from_freelist(struct page *page, struct free_list *free_list)
 	int region_id;
 
 	lru = &page->lru;
+
+	/* Try to fastpath, if deleting from the head of the list */
+	if (lru == free_list->list.next)
+		return rmqueue_del_from_freelist(page, free_list);
+
 	region_id = page_zone_region_id(page);
 	region = &free_list->mr_list[region_id];
 	region->nr_free--;
@@ -587,6 +642,11 @@ page_found:
 
 	prev_page_lru = lru->prev;
 	list_del(lru);
+
+	/*
+	 * Since we are not deleting from the head of the freelist, the
+	 * 'next_region' pointer doesn't have to change.
+	 */
 
 	if (region->nr_free == 0) {
 		region->page_block = NULL;
@@ -1013,7 +1073,7 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 
 		page = list_entry(area->free_list[migratetype].list.next,
 							struct page, lru);
-		del_from_freelist(page, &area->free_list[migratetype]);
+		rmqueue_del_from_freelist(page, &area->free_list[migratetype]);
 		rmv_page_order(page);
 		area->nr_free--;
 		expand(zone, page, order, current_order, area, migratetype);

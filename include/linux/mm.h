@@ -741,6 +741,20 @@ static inline int page_zone_region_id(const struct page *page)
 	return pgdat->node_regions[node_region_idx].zone_region_idx[z_num];
 }
 
+static inline void set_next_region_in_freelist(struct free_list *free_list)
+{
+	struct page *page;
+	int region_id;
+
+	if (unlikely(list_empty(&free_list->list))) {
+		free_list->next_region = NULL;
+	} else {
+		page = list_entry(free_list->list.next, struct page, lru);
+		region_id = page_zone_region_id(page);
+		free_list->next_region = &free_list->mr_list[region_id];
+	}
+}
+
 #ifdef SECTION_IN_PAGE_FLAGS
 static inline void set_page_section(struct page *page, unsigned long section)
 {
