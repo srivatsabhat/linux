@@ -505,6 +505,111 @@ static inline int page_is_buddy(struct page *page, struct page *buddy,
 	return 0;
 }
 
+static void add_to_freelist(struct page *page, struct free_list *free_list)
+{
+	struct list_head *prev_region_list, *lru;
+	struct mem_region_list *region;
+	int region_id, i;
+
+	lru = &page->lru;
+	region_id = page_zone_region_id(page);
+
+	region = &free_list->mr_list[region_id];
+	region->nr_free++;
+
+	if (region->page_block) {
+		list_add_tail(lru, region->page_block);
+		return;
+	}
+
+#ifdef CONFIG_DEBUG_PAGEALLOC
+	WARN(region->nr_free != 1, "%s: nr_free is not unity\n", __func__);
+#endif
+
+	if (!list_empty(&free_list->list)) {
+		for (i = region_id - 1; i >= 0; i--) {
+			if (free_list->mr_list[i].page_block) {
+				prev_region_list =
+					free_list->mr_list[i].page_block;
+				goto out;
+			}
+		}
+	}
+
+	/* This is the first region, so add to the head of the list */
+	prev_region_list = &free_list->list;
+
+out:
+	list_add(lru, prev_region_list);
+
+	/* Save pointer to page block of this region */
+	region->page_block = lru;
+}
+
+static void del_from_freelist(struct page *page, struct free_list *free_list)
+{
+	struct list_head *prev_page_lru, *lru, *p;
+	struct mem_region_list *region;
+	int region_id;
+
+	lru = &page->lru;
+	region_id = page_zone_region_id(page);
+	region = &free_list->mr_list[region_id];
+	region->nr_free--;
+
+#ifdef CONFIG_DEBUG_PAGEALLOC
+	WARN(region->nr_free < 0, "%s: nr_free is negative\n", __func__);
+
+	/* Verify whether this page indeed belongs to this free list! */
+
+	list_for_each(p, &free_list->list) {
+		if (p == lru)
+			goto page_found;
+	}
+
+	WARN(1, "%s: page doesn't belong to the given freelist!\n", __func__);
+
+page_found:
+#endif
+
+	/*
+	 * If we are not deleting the last pageblock in this region (i.e.,
+	 * farthest from list head, but not necessarily the last numerically),
+	 * then we need not update the region->page_block pointer.
+	 */
+	if (lru != region->page_block) {
+		list_del(lru);
+#ifdef CONFIG_DEBUG_PAGEALLOC
+		WARN(region->nr_free == 0, "%s: nr_free messed up\n", __func__);
+#endif
+		return;
+	}
+
+	prev_page_lru = lru->prev;
+	list_del(lru);
+
+	if (region->nr_free == 0) {
+		region->page_block = NULL;
+	} else {
+		region->page_block = prev_page_lru;
+#ifdef CONFIG_DEBUG_PAGEALLOC
+		WARN(prev_page_lru == &free_list->list,
+			"%s: region->page_block points to list head\n",
+								__func__);
+#endif
+	}
+}
+
+/**
+ * Move a given page from one freelist to another.
+ */
+static void move_page_freelist(struct page *page, struct free_list *old_list,
+			       struct free_list *new_list)
+{
+	del_from_freelist(page, old_list);
+	add_to_freelist(page, new_list);
+}
+
 /*
  * Freeing function for a buddy system allocator.
  *
@@ -537,6 +642,7 @@ static inline void __free_one_page(struct page *page,
 	unsigned long combined_idx;
 	unsigned long uninitialized_var(buddy_idx);
 	struct page *buddy;
+	struct free_area *area;
 
 	VM_BUG_ON(!zone_is_initialized(zone));
 
@@ -566,8 +672,9 @@ static inline void __free_one_page(struct page *page,
 			__mod_zone_freepage_state(zone, 1 << order,
 						  migratetype);
 		} else {
-			list_del(&buddy->lru);
-			zone->free_area[order].nr_free--;
+			area = &zone->free_area[order];
+			del_from_freelist(buddy, &area->free_list[migratetype]);
+			area->nr_free--;
 			rmv_page_order(buddy);
 		}
 		combined_idx = buddy_idx & page_idx;
@@ -576,6 +683,7 @@ static inline void __free_one_page(struct page *page,
 		order++;
 	}
 	set_page_order(page, order);
+	area = &zone->free_area[order];
 
 	/*
 	 * If this is not the largest possible page, check if the buddy
@@ -592,16 +700,22 @@ static inline void __free_one_page(struct page *page,
 		buddy_idx = __find_buddy_index(combined_idx, order + 1);
 		higher_buddy = higher_page + (buddy_idx - combined_idx);
 		if (page_is_buddy(higher_page, higher_buddy, order + 1)) {
-			list_add_tail(&page->lru,
-				&zone->free_area[order].free_list[migratetype].list);
+
+			/*
+			 * Implementing an add_to_freelist_tail() won't be
+			 * very useful because both of them (almost) add to
+			 * the tail within the region. So we could potentially
+			 * switch off this entire "is next-higher buddy free?"
+			 * logic when memory regions are used.
+			 */
+			add_to_freelist(page, &area->free_list[migratetype]);
 			goto out;
 		}
 	}
 
-	list_add(&page->lru,
-		&zone->free_area[order].free_list[migratetype].list);
+	add_to_freelist(page, &area->free_list[migratetype]);
 out:
-	zone->free_area[order].nr_free++;
+	area->nr_free++;
 }
 
 static inline int free_pages_check(struct page *page)
@@ -832,7 +946,7 @@ static inline void expand(struct zone *zone, struct page *page,
 			continue;
 		}
 #endif
-		list_add(&page[size].lru, &area->free_list[migratetype].list);
+		add_to_freelist(&page[size], &area->free_list[migratetype]);
 		area->nr_free++;
 		set_page_order(&page[size], high);
 	}
@@ -899,7 +1013,7 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 
 		page = list_entry(area->free_list[migratetype].list.next,
 							struct page, lru);
-		list_del(&page->lru);
+		del_from_freelist(page, &area->free_list[migratetype]);
 		rmv_page_order(page);
 		area->nr_free--;
 		expand(zone, page, order, current_order, area, migratetype);
@@ -940,7 +1054,8 @@ int move_freepages(struct zone *zone,
 {
 	struct page *page;
 	unsigned long order;
-	int pages_moved = 0;
+	struct free_area *area;
+	int pages_moved = 0, old_mt;
 
 #ifndef CONFIG_HOLES_IN_ZONE
 	/*
@@ -968,8 +1083,10 @@ int move_freepages(struct zone *zone,
 		}
 
 		order = page_order(page);
-		list_move(&page->lru,
-			  &zone->free_area[order].free_list[migratetype].list);
+		old_mt = get_freepage_migratetype(page);
+		area = &zone->free_area[order];
+		move_page_freelist(page, &area->free_list[old_mt],
+				    &area->free_list[migratetype]);
 		set_freepage_migratetype(page, migratetype);
 		page += 1 << order;
 		pages_moved += 1 << order;
@@ -1067,7 +1184,7 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype)
 			}
 
 			/* Remove the page from the freelists */
-			list_del(&page->lru);
+			del_from_freelist(page, &area->free_list[migratetype]);
 			rmv_page_order(page);
 
 			/* Take ownership for orders >= pageblock_order */
@@ -1420,7 +1537,8 @@ static int __isolate_free_page(struct page *page, unsigned int order)
 	}
 
 	/* Remove page from free list */
-	list_del(&page->lru);
+	mt = get_freepage_migratetype(page);
+	del_from_freelist(page, &zone->free_area[order].free_list[mt]);
 	zone->free_area[order].nr_free--;
 	rmv_page_order(page);
 
@@ -6131,6 +6249,8 @@ __offline_isolated_pages(unsigned long start_pfn, unsigned long end_pfn)
 	int order, i;
 	unsigned long pfn;
 	unsigned long flags;
+	int mt;
+
 	/* find the first valid pfn */
 	for (pfn = start_pfn; pfn < end_pfn; pfn++)
 		if (pfn_valid(pfn))
@@ -6163,7 +6283,8 @@ __offline_isolated_pages(unsigned long start_pfn, unsigned long end_pfn)
 		printk(KERN_INFO "remove from free list %lx %d %lx\n",
 		       pfn, 1 << order, end_pfn);
 #endif
-		list_del(&page->lru);
+		mt = get_freepage_migratetype(page);
+		del_from_freelist(page, &zone->free_area[order].free_list[mt]);
 		rmv_page_order(page);
 		zone->free_area[order].nr_free--;
 		for (i = 0; i < (1 << order); i++)
