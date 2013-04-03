@@ -4749,6 +4749,7 @@ static void __meminit init_zone_memory_regions(struct pglist_data *pgdat)
 			zone_region->present_pages =
 					zone_region->spanned_pages - absent;
 
+			node_region->zone_region_idx[zone_idx(z)] = idx;
 			idx++;
 		}
 
