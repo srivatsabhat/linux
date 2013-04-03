@@ -4708,6 +4708,66 @@ static void __meminit init_node_memory_regions(struct pglist_data *pgdat)
 	pgdat->nr_node_regions = idx;
 }
 
+static void __meminit init_zone_memory_regions(struct pglist_data *pgdat)
+{
+	unsigned long start_pfn, end_pfn, absent;
+	unsigned long z_start_pfn, z_end_pfn;
+	int i, j, idx, nid = pgdat->node_id;
+	struct node_mem_region *node_region;
+	struct zone_mem_region *zone_region;
+	struct zone *z;
+
+	for (i = 0, j = 0; i < pgdat->nr_zones; i++) {
+		z = &pgdat->node_zones[i];
+		z_start_pfn = z->zone_start_pfn;
+		z_end_pfn = z->zone_start_pfn + z->spanned_pages;
+		idx = 0;
+
+		for ( ; j < pgdat->nr_node_regions; j++) {
+			node_region = &pgdat->node_regions[j];
+
+			/*
+			 * Skip node memory regions that don't intersect with
+			 * this zone.
+			 */
+			if (node_region->end_pfn <= z_start_pfn)
+				continue; /* Move to next higher node region */
+
+			if (node_region->start_pfn >= z_end_pfn)
+				break; /* Move to next higher zone */
+
+			start_pfn = max(z_start_pfn, node_region->start_pfn);
+			end_pfn = min(z_end_pfn, node_region->end_pfn);
+
+			zone_region = &z->zone_regions[idx];
+			zone_region->start_pfn = start_pfn;
+			zone_region->end_pfn = end_pfn;
+			zone_region->spanned_pages = end_pfn - start_pfn;
+
+			absent = __absent_pages_in_range(nid, start_pfn,
+						         end_pfn);
+			zone_region->present_pages =
+					zone_region->spanned_pages - absent;
+
+			idx++;
+		}
+
+		z->nr_zone_regions = idx;
+
+		/*
+		 * Revisit the last visited node memory region, in case it
+		 * spans multiple zones.
+		 */
+		j--;
+	}
+}
+
+static void __meminit init_memory_regions(struct pglist_data *pgdat)
+{
+	init_node_memory_regions(pgdat);
+	init_zone_memory_regions(pgdat);
+}
+
 void __paginginit free_area_init_node(int nid, unsigned long *zones_size,
 		unsigned long node_start_pfn, unsigned long *zholes_size)
 {
@@ -4729,7 +4789,7 @@ void __paginginit free_area_init_node(int nid, unsigned long *zones_size,
 #endif
 
 	free_area_init_core(pgdat, zones_size, zholes_size);
-	init_node_memory_regions(pgdat);
+	init_memory_regions(pgdat);
 }
 
 #ifdef CONFIG_HAVE_MEMBLOCK_NODE_MAP
