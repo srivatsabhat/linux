@@ -102,6 +102,8 @@ struct free_list {
 	 * this freelist.
 	 */
 	struct mem_region_list	mr_list[MAX_NR_ZONE_REGIONS];
+	DECLARE_BITMAP(region_root_mask, BITS_PER_LONG);
+	DECLARE_BITMAP(region_leaf_mask, MAX_NR_ZONE_REGIONS);
 };
 
 struct free_area {
