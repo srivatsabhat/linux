@@ -631,6 +631,7 @@ static void add_to_freelist(struct page *page, struct free_list *free_list,
 	struct list_head *prev_region_list, *lru;
 	struct mem_region_list *region;
 	int region_id, prev_region_id;
+	struct mem_power_ctrl *mpc;
 
 	lru = &page->lru;
 	region_id = page_zone_region_id(page);
@@ -638,6 +639,17 @@ static void add_to_freelist(struct page *page, struct free_list *free_list,
 	region = &free_list->mr_list[region_id];
 	region->nr_free++;
 	region->zone_region->nr_free += 1 << order;
+
+	/*
+	 * If the alloc path detected the usage of a new region, now is
+	 * the time to complete the handshake and queue a worker
+	 * to try compaction on that region.
+	 */
+	mpc = &page_zone(page)->mem_power_ctrl;
+	if (!is_mem_pwr_work_in_progress(mpc) && mpc->region) {
+		set_mem_pwr_work_in_progress(mpc);
+		queue_work(system_unbound_wq, &mpc->work);
+	}
 
 	if (region->page_block) {
 		list_add_tail(lru, region->page_block);
@@ -696,7 +708,9 @@ static void rmqueue_del_from_freelist(struct page *page,
 {
 	struct list_head *lru = &page->lru;
 	struct mem_region_list *mr_list;
-	int region_id;
+	struct zone_mem_region *zmr;
+	struct mem_power_ctrl *mpc;
+	int region_id, mt;
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 	WARN((free_list->list.next != lru),
@@ -706,8 +720,27 @@ static void rmqueue_del_from_freelist(struct page *page,
 	list_del(lru);
 
 	/* Fastpath */
+	region_id = free_list->next_region - free_list->mr_list;
 	mr_list = free_list->next_region;
-	mr_list->zone_region->nr_free -= 1 << order;
+	zmr = mr_list->zone_region;
+	if (region_id != 0 && (zmr->nr_free == zmr->present_pages)) {
+		/*
+		 * This is the first alloc in this memory region. So try
+		 * compacting this region in the near future. Don't bother
+		 * if this is an unmovable/non-reclaimable allocation.
+		 * Also don't try compacting region 0 because its pointless.
+		 */
+		mt = get_freepage_migratetype(page);
+		if (is_migrate_cma(mt) || mt == MIGRATE_MOVABLE ||
+						mt == MIGRATE_RECLAIMABLE) {
+
+			mpc = &page_zone(page)->mem_power_ctrl;
+			if (!is_mem_pwr_work_in_progress(mpc))
+				mpc->region = zmr;
+		}
+	}
+
+	zmr->nr_free -= 1 << order;
 
 	if (--(mr_list->nr_free)) {
 
@@ -723,7 +756,6 @@ static void rmqueue_del_from_freelist(struct page *page,
 	 * in this freelist.
 	 */
 	free_list->next_region->page_block = NULL;
-	region_id = free_list->next_region - free_list->mr_list;
 	clear_region_bit(region_id, free_list);
 
 	/* Set 'next_region' to the new first region in the freelist. */
@@ -736,7 +768,9 @@ static void del_from_freelist(struct page *page, struct free_list *free_list,
 {
 	struct list_head *prev_page_lru, *lru, *p;
 	struct mem_region_list *region;
-	int region_id;
+	struct zone_mem_region *zmr;
+	struct mem_power_ctrl *mpc;
+	int region_id, mt;
 
 	lru = &page->lru;
 
@@ -746,6 +780,25 @@ static void del_from_freelist(struct page *page, struct free_list *free_list,
 
 	region_id = page_zone_region_id(page);
 	region = &free_list->mr_list[region_id];
+
+	zmr = region->zone_region;
+	if (region_id != 0 && (zmr->nr_free == zmr->present_pages)) {
+		/*
+		 * This is the first alloc in this memory region. So try
+		 * compacting this region in the near future. Don't bother
+		 * if this is an unmovable/non-reclaimable allocation.
+		 * Also don't try compacting region 0 because its pointless.
+		 */
+		mt = get_freepage_migratetype(page);
+		if (is_migrate_cma(mt) || mt == MIGRATE_MOVABLE ||
+						mt == MIGRATE_RECLAIMABLE) {
+
+			mpc = &page_zone(page)->mem_power_ctrl;
+			if (!is_mem_pwr_work_in_progress(mpc))
+				mpc->region = zmr;
+		}
+	}
+
 	region->nr_free--;
 	region->zone_region->nr_free -= 1 << order;
 
