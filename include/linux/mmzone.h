@@ -86,6 +86,7 @@ static inline int get_pageblock_migratetype(struct page *page)
 struct mem_region_list {
 	struct list_head	*page_block;
 	unsigned long		nr_free;
+	struct zone_mem_region	*zone_region;
 };
 
 struct free_list {
@@ -341,6 +342,7 @@ struct zone_mem_region {
 	unsigned long end_pfn;
 	unsigned long present_pages;
 	unsigned long spanned_pages;
+	unsigned long nr_free;
 };
 
 struct zone {
