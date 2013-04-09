@@ -15,7 +15,8 @@
 	{MR_MEMORY_HOTPLUG,	"memory_hotplug"},		\
 	{MR_SYSCALL,		"syscall_or_cpuset"},		\
 	{MR_MEMPOLICY_MBIND,	"mempolicy_mbind"},		\
-	{MR_CMA,		"cma"}
+	{MR_CMA,		"cma"},				\
+	{MR_PWR_MGMT,		"power_management"}
 
 TRACE_EVENT(mm_migrate_pages,
 

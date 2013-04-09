@@ -1445,9 +1445,8 @@ retry_reserve:
  * a single hold of the lock, for efficiency.  Add them to the supplied list.
  * Returns the number of new pages which were placed at *list.
  */
-static int rmqueue_bulk(struct zone *zone, unsigned int order,
-			unsigned long count, struct list_head *list,
-			int migratetype, int cold)
+int rmqueue_bulk(struct zone *zone, unsigned int order, unsigned long count,
+		 struct list_head *list, int migratetype, int cold)
 {
 	int mt = migratetype, i;
 
