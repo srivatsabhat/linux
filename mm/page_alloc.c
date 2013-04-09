@@ -5002,6 +5002,35 @@ static void __init_refok alloc_node_mem_map(struct pglist_data *pgdat)
 #endif /* CONFIG_FLAT_NODE_MEM_MAP */
 }
 
+static void mem_power_mgmt_fn(struct work_struct *work)
+{
+	struct mem_power_ctrl *mpc;
+	struct zone_mem_region *region;
+	unsigned long pages_in_use;
+	struct zone *zone;
+
+	mpc = container_of(work, struct mem_power_ctrl, work);
+
+	if (!mpc->region)
+		return; /* No work to do */
+
+	zone = container_of(mpc, struct zone, mem_power_ctrl);
+	region = mpc->region;
+
+	if (region == zone->zone_regions)
+		return; /* No point compacting region 0. */
+
+	pages_in_use = region->present_pages - region->nr_free;
+
+	if (pages_in_use > 0 &&
+			(pages_in_use <= MAX_NR_MEM_PWR_MIGRATE_PAGES)) {
+
+		evacuate_mem_region(zone, region);
+	}
+
+	set_mem_pwr_work_complete(mpc);
+}
+
 static void __meminit init_node_memory_regions(struct pglist_data *pgdat)
 {
 	int nid = pgdat->node_id;
@@ -5093,6 +5122,10 @@ static void __meminit init_zone_memory_regions(struct pglist_data *pgdat)
 		z->nr_zone_regions = idx;
 
 		zone_init_free_lists_late(z);
+
+		INIT_WORK(&z->mem_power_ctrl.work, mem_power_mgmt_fn);
+		z->mem_power_ctrl.region = NULL;
+		set_mem_pwr_work_complete(&z->mem_power_ctrl);
 
 		/*
 		 * Revisit the last visited node memory region, in case it

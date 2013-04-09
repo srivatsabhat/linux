@@ -17,6 +17,7 @@
 #include <linux/pageblock-flags.h>
 #include <linux/page-flags-layout.h>
 #include <linux/atomic.h>
+#include <linux/workqueue.h>
 #include <asm/page.h>
 
 /* Free memory management - zoned buddy allocator.  */
@@ -337,6 +338,24 @@ enum zone_type {
 
 #ifndef __GENERATING_BOUNDS_H
 
+/*
+ * In order to evacuate a memory region, if the no. of pages to be migrated
+ * via compaction is more than this number, the effort is considered too
+ * costly and should be aborted.
+ */
+#define MAX_NR_MEM_PWR_MIGRATE_PAGES	32
+
+enum {
+	MEM_PWR_WORK_COMPLETE = 0,
+	MEM_PWR_WORK_IN_PROGRESS
+};
+
+struct mem_power_ctrl {
+	struct work_struct work;
+	struct zone_mem_region *region;
+	int work_status;
+};
+
 struct zone_mem_region {
 	unsigned long start_pfn;
 	unsigned long end_pfn;
@@ -404,6 +423,8 @@ struct zone {
 
 	struct zone_mem_region	zone_regions[MAX_NR_ZONE_REGIONS];
 	int 			nr_zone_regions;
+
+	struct mem_power_ctrl	mem_power_ctrl;
 
 #ifndef CONFIG_SPARSEMEM
 	/*

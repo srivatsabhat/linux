@@ -755,6 +755,26 @@ static inline void set_next_region_in_freelist(struct free_list *free_list)
 	}
 }
 
+static inline int is_mem_pwr_work_in_progress(struct mem_power_ctrl *mpc)
+{
+	if (mpc->work_status == MEM_PWR_WORK_IN_PROGRESS)
+		return 1;
+	return 0;
+}
+
+static inline void set_mem_pwr_work_in_progress(struct mem_power_ctrl *mpc)
+{
+	mpc->work_status = MEM_PWR_WORK_IN_PROGRESS;
+	smp_mb();
+}
+
+static inline void set_mem_pwr_work_complete(struct mem_power_ctrl *mpc)
+{
+	mpc->work_status = MEM_PWR_WORK_COMPLETE;
+	mpc->region = NULL;
+	smp_mb();
+}
+
 #ifdef SECTION_IN_PAGE_FLAGS
 static inline void set_page_section(struct page *page, unsigned long section)
 {
