@@ -30,6 +30,7 @@
 #include <linux/sched.h> /* for spin_unlock_irq() using preempt_count() m68k */
 #include <linux/tick.h>
 #include <linux/kthread.h>
+#include <linux/cpu.h>
 
 #include "tick-internal.h"
 
@@ -252,6 +253,7 @@ static void clocksource_watchdog(unsigned long data)
 	int64_t wd_nsec, cs_nsec;
 	int next_cpu, reset_pending;
 
+	get_online_cpus_atomic();
 	spin_lock(&watchdog_lock);
 	if (!watchdog_running)
 		goto out;
@@ -329,6 +331,7 @@ static void clocksource_watchdog(unsigned long data)
 	add_timer_on(&watchdog_timer, next_cpu);
 out:
 	spin_unlock(&watchdog_lock);
+	put_online_cpus_atomic();
 }
 
 static inline void clocksource_start_watchdog(void)
@@ -367,6 +370,7 @@ static void clocksource_enqueue_watchdog(struct clocksource *cs)
 {
 	unsigned long flags;
 
+	get_online_cpus_atomic();
 	spin_lock_irqsave(&watchdog_lock, flags);
 	if (cs->flags & CLOCK_SOURCE_MUST_VERIFY) {
 		/* cs is a clocksource to be watched. */
@@ -386,6 +390,7 @@ static void clocksource_enqueue_watchdog(struct clocksource *cs)
 	/* Check if the watchdog timer needs to be started. */
 	clocksource_start_watchdog();
 	spin_unlock_irqrestore(&watchdog_lock, flags);
+	put_online_cpus_atomic();
 }
 
 static void clocksource_dequeue_watchdog(struct clocksource *cs)
