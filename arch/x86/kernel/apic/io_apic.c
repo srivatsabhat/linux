@@ -25,6 +25,7 @@
 #include <linux/init.h>
 #include <linux/delay.h>
 #include <linux/sched.h>
+#include <linux/cpu.h>
 #include <linux/pci.h>
 #include <linux/mc146818rtc.h>
 #include <linux/compiler.h>
@@ -1169,9 +1170,11 @@ int assign_irq_vector(int irq, struct irq_cfg *cfg, const struct cpumask *mask)
 	int err;
 	unsigned long flags;
 
+	get_online_cpus_atomic();
 	raw_spin_lock_irqsave(&vector_lock, flags);
 	err = __assign_irq_vector(irq, cfg, mask);
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
+	put_online_cpus_atomic();
 	return err;
 }
 
@@ -1757,13 +1760,13 @@ __apicdebuginit(void) print_local_APICs(int maxcpu)
 	if (!maxcpu)
 		return;
 
-	preempt_disable();
+	get_online_cpus_atomic();
 	for_each_online_cpu(cpu) {
 		if (cpu >= maxcpu)
 			break;
 		smp_call_function_single(cpu, print_local_APIC, NULL, 1);
 	}
-	preempt_enable();
+	put_online_cpus_atomic();
 }
 
 __apicdebuginit(void) print_PIC(void)
@@ -2153,10 +2156,12 @@ static int ioapic_retrigger_irq(struct irq_data *data)
 	unsigned long flags;
 	int cpu;
 
+	get_online_cpus_atomic();
 	raw_spin_lock_irqsave(&vector_lock, flags);
 	cpu = cpumask_first_and(cfg->domain, cpu_online_mask);
 	apic->send_IPI_mask(cpumask_of(cpu), cfg->vector);
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
+	put_online_cpus_atomic();
 
 	return 1;
 }
@@ -2175,6 +2180,7 @@ void send_cleanup_vector(struct irq_cfg *cfg)
 {
 	cpumask_var_t cleanup_mask;
 
+	get_online_cpus_atomic();
 	if (unlikely(!alloc_cpumask_var(&cleanup_mask, GFP_ATOMIC))) {
 		unsigned int i;
 		for_each_cpu_and(i, cfg->old_domain, cpu_online_mask)
@@ -2185,6 +2191,7 @@ void send_cleanup_vector(struct irq_cfg *cfg)
 		free_cpumask_var(cleanup_mask);
 	}
 	cfg->move_in_progress = 0;
+	put_online_cpus_atomic();
 }
 
 asmlinkage void smp_irq_move_cleanup_interrupt(void)
@@ -2939,11 +2946,13 @@ unsigned int __create_irqs(unsigned int from, unsigned int count, int node)
 			goto out_irqs;
 	}
 
+	get_online_cpus_atomic();
 	raw_spin_lock_irqsave(&vector_lock, flags);
 	for (i = 0; i < count; i++)
 		if (__assign_irq_vector(irq + i, cfg[i], apic->target_cpus()))
 			goto out_vecs;
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
+	put_online_cpus_atomic();
 
 	for (i = 0; i < count; i++) {
 		irq_set_chip_data(irq + i, cfg[i]);
@@ -2957,6 +2966,7 @@ out_vecs:
 	for (i--; i >= 0; i--)
 		__clear_irq_vector(irq + i, cfg[i]);
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
+	put_online_cpus_atomic();
 out_irqs:
 	for (i = 0; i < count; i++)
 		free_irq_at(irq + i, cfg[i]);
@@ -2994,9 +3004,11 @@ void destroy_irq(unsigned int irq)
 
 	free_remapped_irq(irq);
 
+	get_online_cpus_atomic();
 	raw_spin_lock_irqsave(&vector_lock, flags);
 	__clear_irq_vector(irq, cfg);
 	raw_spin_unlock_irqrestore(&vector_lock, flags);
+	put_online_cpus_atomic();
 	free_irq_at(irq, cfg);
 }
 
@@ -3365,8 +3377,11 @@ io_apic_setup_irq_pin(unsigned int irq, int node, struct io_apic_irq_attr *attr)
 	if (!cfg)
 		return -EINVAL;
 	ret = __add_pin_to_irq_node(cfg, node, attr->ioapic, attr->ioapic_pin);
-	if (!ret)
+	if (!ret) {
+		get_online_cpus_atomic();
 		setup_ioapic_irq(irq, cfg, attr);
+		put_online_cpus_atomic();
+	}
 	return ret;
 }
 
