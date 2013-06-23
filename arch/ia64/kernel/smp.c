@@ -24,6 +24,7 @@
 #include <linux/init.h>
 #include <linux/interrupt.h>
 #include <linux/smp.h>
+#include <linux/cpu.h>
 #include <linux/kernel_stat.h>
 #include <linux/mm.h>
 #include <linux/cache.h>
@@ -259,8 +260,7 @@ smp_flush_tlb_cpumask(cpumask_t xcpumask)
 	cpumask_t cpumask = xcpumask;
 	int mycpu, cpu, flush_mycpu = 0;
 
-	preempt_disable();
-	mycpu = smp_processor_id();
+	mycpu = get_online_cpus_atomic();
 
 	for_each_cpu_mask(cpu, cpumask)
 		counts[cpu] = local_tlb_flush_counts[cpu].count & 0xffff;
@@ -280,7 +280,7 @@ smp_flush_tlb_cpumask(cpumask_t xcpumask)
 		while(counts[cpu] == (local_tlb_flush_counts[cpu].count & 0xffff))
 			udelay(FLUSH_DELAY);
 
-	preempt_enable();
+	put_online_cpus_atomic();
 }
 
 void
@@ -293,12 +293,12 @@ void
 smp_flush_tlb_mm (struct mm_struct *mm)
 {
 	cpumask_var_t cpus;
-	preempt_disable();
+	get_online_cpus_atomic();
 	/* this happens for the common case of a single-threaded fork():  */
 	if (likely(mm == current->active_mm && atomic_read(&mm->mm_users) == 1))
 	{
 		local_finish_flush_tlb_mm(mm);
-		preempt_enable();
+		put_online_cpus_atomic();
 		return;
 	}
 	if (!alloc_cpumask_var(&cpus, GFP_ATOMIC)) {
@@ -313,7 +313,7 @@ smp_flush_tlb_mm (struct mm_struct *mm)
 	local_irq_disable();
 	local_finish_flush_tlb_mm(mm);
 	local_irq_enable();
-	preempt_enable();
+	put_online_cpus_atomic();
 }
 
 void arch_send_call_function_single_ipi(int cpu)
