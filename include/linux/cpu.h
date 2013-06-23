@@ -175,6 +175,8 @@ extern struct bus_type cpu_subsys;
 
 extern void get_online_cpus(void);
 extern void put_online_cpus(void);
+extern unsigned int get_online_cpus_atomic(void);
+extern void put_online_cpus_atomic(void);
 extern void cpu_hotplug_disable(void);
 extern void cpu_hotplug_enable(void);
 #define hotcpu_notifier(fn, pri)	cpu_notifier(fn, pri)
@@ -202,6 +204,22 @@ static inline void cpu_hotplug_driver_unlock(void)
 #define put_online_cpus()	do { } while (0)
 #define cpu_hotplug_disable()	do { } while (0)
 #define cpu_hotplug_enable()	do { } while (0)
+
+static inline unsigned int get_online_cpus_atomic(void)
+{
+	/*
+	 * Disable preemption to avoid getting complaints from the
+	 * debug_smp_processor_id() code.
+	 */
+	preempt_disable();
+	return smp_processor_id();
+}
+
+static inline void put_online_cpus_atomic(void)
+{
+	preempt_enable();
+}
+
 #define hotcpu_notifier(fn, pri)	do { (void)(fn); } while (0)
 /* These aren't inline functions due to a GCC bug. */
 #define register_hotcpu_notifier(nb)	({ (void)(nb); 0; })
