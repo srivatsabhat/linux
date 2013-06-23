@@ -169,6 +169,7 @@ static inline unsigned int cpumask_any_but(const struct cpumask *mask,
  */
 static inline unsigned int cpumask_first(const struct cpumask *srcp)
 {
+	check_hotplug_safe_cpumask(srcp);
 	return find_first_bit(cpumask_bits(srcp), nr_cpumask_bits);
 }
 
@@ -184,6 +185,8 @@ static inline unsigned int cpumask_next(int n, const struct cpumask *srcp)
 	/* -1 is a legal arg here. */
 	if (n != -1)
 		cpumask_check(n);
+
+	check_hotplug_safe_cpumask(srcp);
 	return find_next_bit(cpumask_bits(srcp), nr_cpumask_bits, n+1);
 }
 
@@ -199,6 +202,8 @@ static inline unsigned int cpumask_next_zero(int n, const struct cpumask *srcp)
 	/* -1 is a legal arg here. */
 	if (n != -1)
 		cpumask_check(n);
+
+	check_hotplug_safe_cpumask(srcp);
 	return find_next_zero_bit(cpumask_bits(srcp), nr_cpumask_bits, n+1);
 }
 
@@ -288,8 +293,15 @@ static inline void cpumask_clear_cpu(int cpu, struct cpumask *dstp)
  *
  * No static inline type checking - see Subtlety (1) above.
  */
-#define cpumask_test_cpu(cpu, cpumask) \
-	test_bit(cpumask_check(cpu), cpumask_bits((cpumask)))
+#define cpumask_test_cpu(cpu, cpumask)				\
+({								\
+	int __ret;						\
+								\
+	check_hotplug_safe_cpu(cpu, cpumask);			\
+	__ret = test_bit(cpumask_check(cpu),			\
+				cpumask_bits((cpumask)));	\
+	__ret;							\
+})
 
 /**
  * cpumask_test_and_set_cpu - atomically test and set a cpu in a cpumask
@@ -349,6 +361,9 @@ static inline int cpumask_and(struct cpumask *dstp,
 			       const struct cpumask *src1p,
 			       const struct cpumask *src2p)
 {
+	check_hotplug_safe_cpumask(src1p);
+	check_hotplug_safe_cpumask(src2p);
+
 	return bitmap_and(cpumask_bits(dstp), cpumask_bits(src1p),
 				       cpumask_bits(src2p), nr_cpumask_bits);
 }
@@ -362,6 +377,9 @@ static inline int cpumask_and(struct cpumask *dstp,
 static inline void cpumask_or(struct cpumask *dstp, const struct cpumask *src1p,
 			      const struct cpumask *src2p)
 {
+	check_hotplug_safe_cpumask(src1p);
+	check_hotplug_safe_cpumask(src2p);
+
 	bitmap_or(cpumask_bits(dstp), cpumask_bits(src1p),
 				      cpumask_bits(src2p), nr_cpumask_bits);
 }
@@ -376,6 +394,9 @@ static inline void cpumask_xor(struct cpumask *dstp,
 			       const struct cpumask *src1p,
 			       const struct cpumask *src2p)
 {
+	check_hotplug_safe_cpumask(src1p);
+	check_hotplug_safe_cpumask(src2p);
+
 	bitmap_xor(cpumask_bits(dstp), cpumask_bits(src1p),
 				       cpumask_bits(src2p), nr_cpumask_bits);
 }
@@ -392,6 +413,9 @@ static inline int cpumask_andnot(struct cpumask *dstp,
 				  const struct cpumask *src1p,
 				  const struct cpumask *src2p)
 {
+	check_hotplug_safe_cpumask(src1p);
+	check_hotplug_safe_cpumask(src2p);
+
 	return bitmap_andnot(cpumask_bits(dstp), cpumask_bits(src1p),
 					  cpumask_bits(src2p), nr_cpumask_bits);
 }
@@ -404,6 +428,8 @@ static inline int cpumask_andnot(struct cpumask *dstp,
 static inline void cpumask_complement(struct cpumask *dstp,
 				      const struct cpumask *srcp)
 {
+	check_hotplug_safe_cpumask(srcp);
+
 	bitmap_complement(cpumask_bits(dstp), cpumask_bits(srcp),
 					      nr_cpumask_bits);
 }
@@ -416,6 +442,9 @@ static inline void cpumask_complement(struct cpumask *dstp,
 static inline bool cpumask_equal(const struct cpumask *src1p,
 				const struct cpumask *src2p)
 {
+	check_hotplug_safe_cpumask(src1p);
+	check_hotplug_safe_cpumask(src2p);
+
 	return bitmap_equal(cpumask_bits(src1p), cpumask_bits(src2p),
 						 nr_cpumask_bits);
 }
@@ -428,6 +457,10 @@ static inline bool cpumask_equal(const struct cpumask *src1p,
 static inline bool cpumask_intersects(const struct cpumask *src1p,
 				     const struct cpumask *src2p)
 {
+
+	check_hotplug_safe_cpumask(src1p);
+	check_hotplug_safe_cpumask(src2p);
+
 	return bitmap_intersects(cpumask_bits(src1p), cpumask_bits(src2p),
 						      nr_cpumask_bits);
 }
@@ -442,6 +475,9 @@ static inline bool cpumask_intersects(const struct cpumask *src1p,
 static inline int cpumask_subset(const struct cpumask *src1p,
 				 const struct cpumask *src2p)
 {
+	check_hotplug_safe_cpumask(src1p);
+	check_hotplug_safe_cpumask(src2p);
+
 	return bitmap_subset(cpumask_bits(src1p), cpumask_bits(src2p),
 						  nr_cpumask_bits);
 }
@@ -470,6 +506,12 @@ static inline bool cpumask_full(const struct cpumask *srcp)
  */
 static inline unsigned int cpumask_weight(const struct cpumask *srcp)
 {
+	/*
+	 * Often, we just want to have a rough estimate of the number of
+	 * online CPUs, without going to the trouble of synchronizing with
+	 * CPU hotplug. So don't invoke check_hotplug_safe_cpumask() here.
+	 */
+
 	return bitmap_weight(cpumask_bits(srcp), nr_cpumask_bits);
 }
 
@@ -507,6 +549,7 @@ static inline void cpumask_shift_left(struct cpumask *dstp,
 static inline void cpumask_copy(struct cpumask *dstp,
 				const struct cpumask *srcp)
 {
+	check_hotplug_safe_cpumask(srcp);
 	bitmap_copy(cpumask_bits(dstp), cpumask_bits(srcp), nr_cpumask_bits);
 }
 
