@@ -20,6 +20,7 @@
 #include <linux/fs.h>
 #include <linux/string.h>
 #include <linux/kernel.h>
+#include <linux/cpu.h>
 #include <asm/pgtable.h>
 #include <asm/homecache.h>
 #include <arch/opcode.h>
@@ -79,8 +80,10 @@ void module_free(struct module *mod, void *module_region)
 	vfree(module_region);
 
 	/* Globally flush the L1 icache. */
+	get_online_cpus_atomic();
 	flush_remote(0, HV_FLUSH_EVICT_L1I, cpu_online_mask,
 		     0, 0, 0, NULL, NULL, 0);
+	put_online_cpus_atomic();
 
 	/*
 	 * FIXME: If module_region == mod->module_init, trim exception

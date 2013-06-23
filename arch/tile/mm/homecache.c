@@ -397,9 +397,12 @@ void homecache_change_page_home(struct page *page, int order, int home)
 	BUG_ON(page_count(page) > 1);
 	BUG_ON(page_mapcount(page) != 0);
 	kva = (unsigned long) page_address(page);
+
+	get_online_cpus_atomic();
 	flush_remote(0, HV_FLUSH_EVICT_L2, &cpu_cacheable_map,
 		     kva, pages * PAGE_SIZE, PAGE_SIZE, cpu_online_mask,
 		     NULL, 0);
+	put_online_cpus_atomic();
 
 	for (i = 0; i < pages; ++i, kva += PAGE_SIZE) {
 		pte_t *ptep = virt_to_pte(NULL, kva);
