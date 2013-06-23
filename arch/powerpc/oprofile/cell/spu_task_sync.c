@@ -28,6 +28,7 @@
 #include <linux/oprofile.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/cpu.h>
 #include "pr_util.h"
 
 #define RELEASE_ALL 9999
@@ -448,11 +449,14 @@ static int number_of_online_nodes(void)
 {
         u32 cpu; u32 tmp;
         int nodes = 0;
+
+	get_online_cpus_atomic();
         for_each_online_cpu(cpu) {
                 tmp = cbe_cpu_to_node(cpu) + 1;
                 if (tmp > nodes)
                         nodes++;
         }
+	put_online_cpus_atomic();
         return nodes;
 }
 

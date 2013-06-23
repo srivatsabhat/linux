@@ -14,6 +14,7 @@
 
 #include <linux/hrtimer.h>
 #include <linux/smp.h>
+#include <linux/cpu.h>
 #include <linux/slab.h>
 #include <asm/cell-pmu.h>
 #include <asm/time.h>
@@ -142,6 +143,7 @@ static enum hrtimer_restart profile_spus(struct hrtimer *timer)
 	if (!spu_prof_running)
 		goto stop;
 
+	get_online_cpus_atomic();
 	for_each_online_cpu(cpu) {
 		if (cbe_get_hw_thread_id(cpu))
 			continue;
@@ -177,6 +179,7 @@ static enum hrtimer_restart profile_spus(struct hrtimer *timer)
 				       oprof_spu_smpl_arry_lck_flags);
 
 	}
+	put_online_cpus_atomic();
 	smp_wmb();	/* insure spu event buffer updates are written */
 			/* don't want events intermingled... */
 

@@ -45,6 +45,7 @@
 #include <linux/irq.h>
 #include <linux/seq_file.h>
 #include <linux/cpumask.h>
+#include <linux/cpu.h>
 #include <linux/profile.h>
 #include <linux/bitops.h>
 #include <linux/list.h>
@@ -410,7 +411,10 @@ void migrate_irqs(void)
 	unsigned int irq;
 	static int warned;
 	cpumask_var_t mask;
-	const struct cpumask *map = cpu_online_mask;
+	const struct cpumask *map;
+
+	get_online_cpus_atomic();
+	map = cpu_online_mask;
 
 	alloc_cpumask_var(&mask, GFP_ATOMIC);
 
@@ -436,6 +440,7 @@ void migrate_irqs(void)
 	}
 
 	free_cpumask_var(mask);
+	put_online_cpus_atomic();
 
 	local_irq_enable();
 	mdelay(1);
