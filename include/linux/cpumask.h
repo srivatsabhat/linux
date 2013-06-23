@@ -101,6 +101,18 @@ extern const struct cpumask *const cpu_active_mask;
 #define cpu_active(cpu)		((cpu) == 0)
 #endif
 
+#ifdef CONFIG_DEBUG_HOTPLUG_CPU
+extern void check_hotplug_safe_cpumask(const struct cpumask *mask);
+extern void check_hotplug_safe_cpu(unsigned int cpu,
+				   const struct cpumask *mask);
+#else
+static inline void check_hotplug_safe_cpumask(const struct cpumask *mask) { }
+static inline void check_hotplug_safe_cpu(unsigned int cpu,
+					  const struct cpumask *mask)
+{
+}
+#endif
+
 /* verify cpu argument to cpumask_* operators */
 static inline unsigned int cpumask_check(unsigned int cpu)
 {

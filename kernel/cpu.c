@@ -63,6 +63,72 @@ static struct {
 	.refcount = 0,
 };
 
+#ifdef CONFIG_DEBUG_HOTPLUG_CPU
+
+static DEFINE_PER_CPU(unsigned long, atomic_reader_refcnt);
+
+static int current_is_hotplug_safe(const struct cpumask *mask)
+{
+
+	/* If we are not dealing with cpu_online_mask, don't complain. */
+	if (mask != cpu_online_mask)
+		return 1;
+
+	/* If this is the task doing hotplug, don't complain. */
+	if (unlikely(current == cpu_hotplug.active_writer))
+		return 1;
+
+	/* If we are in early boot, don't complain. */
+	if (system_state != SYSTEM_RUNNING)
+		return 1;
+
+	/*
+	 * Check if the current task is in atomic context and it has
+	 * invoked get_online_cpus_atomic() to synchronize with
+	 * CPU Hotplug.
+	 */
+	if (preempt_count() || irqs_disabled())
+		return this_cpu_read(atomic_reader_refcnt);
+	else
+		return 1; /* No checks for non-atomic contexts for now */
+}
+
+static inline void warn_hotplug_unsafe(void)
+{
+	WARN_ONCE(1, "Must use get/put_online_cpus_atomic() to synchronize"
+		     " with CPU hotplug\n");
+}
+
+/*
+ * Check if the task (executing in atomic context) has the required protection
+ * against CPU hotplug, while accessing the specified cpumask.
+ */
+void check_hotplug_safe_cpumask(const struct cpumask *mask)
+{
+	if (!current_is_hotplug_safe(mask))
+		warn_hotplug_unsafe();
+}
+EXPORT_SYMBOL_GPL(check_hotplug_safe_cpumask);
+
+/*
+ * Similar to check_hotplug_safe_cpumask(), except that we don't complain
+ * if the task (executing in atomic context) is testing whether the CPU it
+ * is executing on is online or not.
+ *
+ * (A task executing with preemption disabled on a CPU, automatically prevents
+ *  offlining that CPU, irrespective of the actual implementation of CPU
+ *  offline. So we don't enforce holding of get_online_cpus_atomic() for that
+ *  case).
+ */
+void check_hotplug_safe_cpu(unsigned int cpu, const struct cpumask *mask)
+{
+	if(!current_is_hotplug_safe(mask) && cpu != smp_processor_id())
+		warn_hotplug_unsafe();
+}
+EXPORT_SYMBOL_GPL(check_hotplug_safe_cpu);
+
+#endif
+
 void get_online_cpus(void)
 {
 	might_sleep();
@@ -189,13 +255,22 @@ unsigned int get_online_cpus_atomic(void)
 	 * from going offline.
 	 */
 	preempt_disable();
+
+#ifdef CONFIG_DEBUG_HOTPLUG_CPU
+	this_cpu_inc(atomic_reader_refcnt);
+#endif
 	return smp_processor_id();
 }
 EXPORT_SYMBOL_GPL(get_online_cpus_atomic);
 
 void put_online_cpus_atomic(void)
 {
+
+#ifdef CONFIG_DEBUG_HOTPLUG_CPU
+	this_cpu_dec(atomic_reader_refcnt);
+#endif
 	preempt_enable();
+
 }
 EXPORT_SYMBOL_GPL(put_online_cpus_atomic);
 
