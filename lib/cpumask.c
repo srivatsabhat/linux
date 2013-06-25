@@ -7,12 +7,14 @@
 
 int __first_cpu(const cpumask_t *srcp)
 {
+	check_hotplug_safe_cpumask(srcp);
 	return min_t(int, NR_CPUS, find_first_bit(srcp->bits, NR_CPUS));
 }
 EXPORT_SYMBOL(__first_cpu);
 
 int __next_cpu(int n, const cpumask_t *srcp)
 {
+	check_hotplug_safe_cpumask(srcp);
 	return min_t(int, NR_CPUS, find_next_bit(srcp->bits, NR_CPUS, n+1));
 }
 EXPORT_SYMBOL(__next_cpu);
@@ -20,6 +22,7 @@ EXPORT_SYMBOL(__next_cpu);
 #if NR_CPUS > 64
 int __next_cpu_nr(int n, const cpumask_t *srcp)
 {
+	check_hotplug_safe_cpumask(srcp);
 	return min_t(int, nr_cpu_ids,
 				find_next_bit(srcp->bits, nr_cpu_ids, n+1));
 }
@@ -37,6 +40,9 @@ EXPORT_SYMBOL(__next_cpu_nr);
 int cpumask_next_and(int n, const struct cpumask *src1p,
 		     const struct cpumask *src2p)
 {
+	check_hotplug_safe_cpumask(src1p);
+	check_hotplug_safe_cpumask(src2p);
+
 	while ((n = cpumask_next(n, src1p)) < nr_cpu_ids)
 		if (cpumask_test_cpu(n, src2p))
 			break;
@@ -57,6 +63,8 @@ int cpumask_any_but(const struct cpumask *mask, unsigned int cpu)
 	unsigned int i;
 
 	cpumask_check(cpu);
+	check_hotplug_safe_cpumask(mask);
+
 	for_each_cpu(i, mask)
 		if (i != cpu)
 			break;
