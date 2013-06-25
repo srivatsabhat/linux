@@ -13,6 +13,7 @@
 #include <linux/mman.h>
 #include <linux/threads.h>
 #include <linux/interrupt.h>
+#include <linux/cpu.h>
 #include <asm/page.h>
 #include <asm/pgtable.h>
 #include <asm/processor.h>
@@ -91,6 +92,7 @@ void smp_cache_interrupt(void)
 void smp_cache_call(unsigned long opr_mask,
 		    unsigned long start, unsigned long end)
 {
+	get_online_cpus_atomic();
 	smp_cache_mask = opr_mask;
 	smp_cache_start = start;
 	smp_cache_end = end;
@@ -102,4 +104,5 @@ void smp_cache_call(unsigned long opr_mask,
 	while (!cpumask_empty(&smp_cache_ipi_map))
 		/* nothing. lockup detection does not belong here */
 		mb();
+	put_online_cpus_atomic();
 }
