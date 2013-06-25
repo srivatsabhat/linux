@@ -98,6 +98,15 @@ s64 __percpu_counter_sum(struct percpu_counter *fbc)
 	s64 ret;
 	int cpu;
 
+	/*
+	 * The calls to get/put_online_cpus_atomic() is strictly not
+	 * necessary, since CPU hotplug is explicitly handled via the
+	 * hotplug callback which synchronizes through fbc->lock.
+	 * But we add them here anyway to make it easier for the debug
+	 * code under CONFIG_DEBUG_HOTPLUG_CPU to validate the correctness
+	 * of hotplug synchronization.
+	 */
+	get_online_cpus_atomic();
 	raw_spin_lock(&fbc->lock);
 	ret = fbc->count;
 	for_each_online_cpu(cpu) {
@@ -105,6 +114,7 @@ s64 __percpu_counter_sum(struct percpu_counter *fbc)
 		ret += *pcount;
 	}
 	raw_spin_unlock(&fbc->lock);
+	put_online_cpus_atomic();
 	return ret;
 }
 EXPORT_SYMBOL(__percpu_counter_sum);
