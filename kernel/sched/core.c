@@ -1160,11 +1160,11 @@ void kick_process(struct task_struct *p)
 {
 	int cpu;
 
-	preempt_disable();
+	get_online_cpus_atomic();
 	cpu = task_cpu(p);
 	if ((cpu != smp_processor_id()) && task_curr(p))
 		smp_send_reschedule(cpu);
-	preempt_enable();
+	put_online_cpus_atomic();
 }
 EXPORT_SYMBOL_GPL(kick_process);
 #endif /* CONFIG_SMP */
@@ -1172,6 +1172,9 @@ EXPORT_SYMBOL_GPL(kick_process);
 #ifdef CONFIG_SMP
 /*
  * ->cpus_allowed is protected by both rq->lock and p->pi_lock
+ *
+ *  Must be called within get/put_online_cpus_atomic(), to prevent
+ *  CPUs from going offline from under us.
  */
 static int select_fallback_rq(int cpu, struct task_struct *p)
 {
@@ -1245,6 +1248,9 @@ out:
 
 /*
  * The caller (fork, wakeup) owns p->pi_lock, ->cpus_allowed is stable.
+ *
+ * Must be called within get/put_online_cpus_atomic(), to prevent
+ * CPUs from going offline from under us.
  */
 static inline
 int select_task_rq(struct task_struct *p, int sd_flags, int wake_flags)
@@ -1489,6 +1495,8 @@ try_to_wake_up(struct task_struct *p, unsigned int state, int wake_flags)
 	unsigned long flags;
 	int cpu, success = 0;
 
+	get_online_cpus_atomic();
+
 	smp_wmb();
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 	if (!(p->state & state))
@@ -1531,6 +1539,7 @@ stat:
 out:
 	raw_spin_unlock_irqrestore(&p->pi_lock, flags);
 
+	put_online_cpus_atomic();
 	return success;
 }
 
@@ -1753,6 +1762,8 @@ void wake_up_new_task(struct task_struct *p)
 	unsigned long flags;
 	struct rq *rq;
 
+	get_online_cpus_atomic();
+
 	raw_spin_lock_irqsave(&p->pi_lock, flags);
 #ifdef CONFIG_SMP
 	/*
@@ -1773,6 +1784,8 @@ void wake_up_new_task(struct task_struct *p)
 		p->sched_class->task_woken(rq, p);
 #endif
 	task_rq_unlock(rq, p, &flags);
+
+	put_online_cpus_atomic();
 }
 
 #ifdef CONFIG_PREEMPT_NOTIFIERS
@@ -3886,6 +3899,8 @@ bool __sched yield_to(struct task_struct *p, bool preempt)
 	unsigned long flags;
 	int yielded = 0;
 
+	get_online_cpus_atomic();
+
 	local_irq_save(flags);
 	rq = this_rq();
 
@@ -3930,6 +3945,8 @@ out_unlock:
 	double_rq_unlock(rq, p_rq);
 out_irq:
 	local_irq_restore(flags);
+
+	put_online_cpus_atomic();
 
 	if (yielded > 0)
 		schedule();
@@ -4331,9 +4348,11 @@ static int migration_cpu_stop(void *data)
 	 * The original target cpu might have gone down and we might
 	 * be on another cpu but it doesn't matter.
 	 */
+	get_online_cpus_atomic();
 	local_irq_disable();
 	__migrate_task(arg->task, raw_smp_processor_id(), arg->dest_cpu);
 	local_irq_enable();
+	put_online_cpus_atomic();
 	return 0;
 }
 
