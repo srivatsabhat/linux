@@ -194,6 +194,8 @@ void switch_mmu_context(struct mm_struct *prev, struct mm_struct *next)
 	unsigned int i, id, cpu = smp_processor_id();
 	unsigned long *map;
 
+	get_online_cpus_atomic();
+
 	/* No lockless fast path .. yet */
 	raw_spin_lock(&context_lock);
 
@@ -280,6 +282,7 @@ void switch_mmu_context(struct mm_struct *prev, struct mm_struct *next)
 	pr_hardcont(" -> %d\n", id);
 	set_context(id, next->pgd);
 	raw_spin_unlock(&context_lock);
+	put_online_cpus_atomic();
 }
 
 /*

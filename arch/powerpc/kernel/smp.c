@@ -277,9 +277,11 @@ void smp_send_debugger_break(void)
 	if (unlikely(!smp_ops))
 		return;
 
+	get_online_cpus_atomic();
 	for_each_online_cpu(cpu)
 		if (cpu != me)
 			do_message_pass(cpu, PPC_MSG_DEBUGGER_BREAK);
+	put_online_cpus_atomic();
 }
 #endif
 

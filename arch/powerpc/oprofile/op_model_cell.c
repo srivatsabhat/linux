@@ -22,6 +22,7 @@
 #include <linux/oprofile.h>
 #include <linux/percpu.h>
 #include <linux/smp.h>
+#include <linux/cpu.h>
 #include <linux/spinlock.h>
 #include <linux/timer.h>
 #include <asm/cell-pmu.h>
@@ -463,6 +464,7 @@ static void cell_virtual_cntr(unsigned long data)
 	 * not both playing with the counters on the same node.
 	 */
 
+	get_online_cpus_atomic();
 	spin_lock_irqsave(&cntr_lock, flags);
 
 	prev_hdw_thread = hdw_thread;
@@ -550,6 +552,7 @@ static void cell_virtual_cntr(unsigned long data)
 	}
 
 	spin_unlock_irqrestore(&cntr_lock, flags);
+	put_online_cpus_atomic();
 
 	mod_timer(&timer_virt_cntr, jiffies + HZ / 10);
 }
@@ -608,6 +611,8 @@ static void spu_evnt_swap(unsigned long data)
 	/* Make sure spu event interrupt handler and spu event swap
 	 * don't access the counters simultaneously.
 	 */
+
+	get_online_cpus_atomic();
 	spin_lock_irqsave(&cntr_lock, flags);
 
 	cur_spu_evnt_phys_spu_indx = spu_evnt_phys_spu_indx;
@@ -673,6 +678,7 @@ static void spu_evnt_swap(unsigned long data)
 	}
 
 	spin_unlock_irqrestore(&cntr_lock, flags);
+	put_online_cpus_atomic();
 
 	/* swap approximately every 0.1 seconds */
 	mod_timer(&timer_spu_event_swap, jiffies + HZ / 25);

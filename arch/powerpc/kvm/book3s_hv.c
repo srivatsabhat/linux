@@ -28,6 +28,7 @@
 #include <linux/fs.h>
 #include <linux/anon_inodes.h>
 #include <linux/cpumask.h>
+#include <linux/cpu.h>
 #include <linux/spinlock.h>
 #include <linux/page-flags.h>
 #include <linux/srcu.h>
@@ -78,7 +79,7 @@ void kvmppc_fast_vcpu_kick(struct kvm_vcpu *vcpu)
 		++vcpu->stat.halt_wakeup;
 	}
 
-	me = get_cpu();
+	me = get_online_cpus_atomic();
 
 	/* CPU points to the first thread of the core */
 	if (cpu != me && cpu >= 0 && cpu < nr_cpu_ids) {
@@ -88,7 +89,7 @@ void kvmppc_fast_vcpu_kick(struct kvm_vcpu *vcpu)
 		else if (cpu_online(cpu))
 			smp_send_reschedule(cpu);
 	}
-	put_cpu();
+	put_online_cpus_atomic();
 }
 
 /*
