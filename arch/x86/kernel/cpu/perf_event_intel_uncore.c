@@ -1,3 +1,4 @@
+#include <linux/cpu.h>
 #include "perf_event_intel_uncore.h"
 
 static struct intel_uncore_type *empty_uncore[] = { NULL, };
@@ -2630,6 +2631,7 @@ uncore_pmu_to_box(struct intel_uncore_pmu *pmu, int cpu)
 	if (box)
 		return box;
 
+	get_online_cpus_atomic();
 	raw_spin_lock(&uncore_box_lock);
 	list_for_each_entry(box, &pmu->box_list, list) {
 		if (box->phys_id == topology_physical_package_id(cpu)) {
@@ -2639,6 +2641,7 @@ uncore_pmu_to_box(struct intel_uncore_pmu *pmu, int cpu)
 		}
 	}
 	raw_spin_unlock(&uncore_box_lock);
+	put_online_cpus_atomic();
 
 	return *per_cpu_ptr(pmu->box, cpu);
 }
@@ -3229,6 +3232,7 @@ static void uncore_pci_remove(struct pci_dev *pdev)
 	list_del(&box->list);
 	raw_spin_unlock(&uncore_box_lock);
 
+	get_online_cpus_atomic();
 	for_each_possible_cpu(cpu) {
 		if (*per_cpu_ptr(pmu->box, cpu) == box) {
 			*per_cpu_ptr(pmu->box, cpu) = NULL;
@@ -3237,6 +3241,8 @@ static void uncore_pci_remove(struct pci_dev *pdev)
 	}
 
 	WARN_ON_ONCE(atomic_read(&box->refcnt) != 1);
+	put_online_cpus_atomic();
+
 	kfree(box);
 }
 
