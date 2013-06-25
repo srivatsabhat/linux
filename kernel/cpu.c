@@ -154,6 +154,44 @@ void cpu_hotplug_enable(void)
 	cpu_maps_update_done();
 }
 
+/*
+ * get_online_cpus_atomic - Prevent any CPU from going offline
+ *
+ * Atomic hotplug readers (tasks which wish to prevent CPUs from going
+ * offline during their critical section, but can't afford to sleep)
+ * can invoke this function to synchronize with CPU offline. This function
+ * can be called recursively, provided it is matched with an equal number
+ * of calls to put_online_cpus_atomic().
+ *
+ * Note: This does NOT prevent CPUs from coming online! It only prevents
+ * CPUs from going offline.
+ *
+ * Lock ordering rule: Strictly speaking, there is no lock ordering
+ * requirement here, but it is advisable to keep the locking consistent.
+ * As a simple rule-of-thumb, use these functions in the outer-most blocks
+ * of your critical sections, outside of other locks.
+ *
+ * Returns the current CPU number, with preemption disabled.
+ */
+unsigned int get_online_cpus_atomic(void)
+{
+	/*
+	 * The current CPU hotplug implementation uses stop_machine() in
+	 * the CPU offline path. And disabling preemption prevents
+	 * stop_machine() from taking effect. Thus, this prevents any CPU
+	 * from going offline.
+	 */
+	preempt_disable();
+	return smp_processor_id();
+}
+EXPORT_SYMBOL_GPL(get_online_cpus_atomic);
+
+void put_online_cpus_atomic(void)
+{
+	preempt_enable();
+}
+EXPORT_SYMBOL_GPL(put_online_cpus_atomic);
+
 #else /* #if CONFIG_HOTPLUG_CPU */
 static void cpu_hotplug_begin(void) {}
 static void cpu_hotplug_done(void) {}
