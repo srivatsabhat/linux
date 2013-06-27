@@ -792,7 +792,9 @@ static void smp_cross_call_masked(unsigned long *func, u32 ctx, u64 data1, u64 d
 /* Send cross call to all processors except self. */
 static void smp_cross_call(unsigned long *func, u32 ctx, u64 data1, u64 data2)
 {
+	get_online_cpus_atomic();
 	smp_cross_call_masked(func, ctx, data1, data2, cpu_online_mask);
+	put_online_cpus_atomic();
 }
 
 extern unsigned long xcall_sync_tick;
@@ -896,7 +898,7 @@ void smp_flush_dcache_page_impl(struct page *page, int cpu)
 	atomic_inc(&dcpage_flushes);
 #endif
 
-	this_cpu = get_cpu();
+	this_cpu = get_online_cpus_atomic();
 
 	if (cpu == this_cpu) {
 		__local_flush_dcache_page(page);
@@ -922,7 +924,7 @@ void smp_flush_dcache_page_impl(struct page *page, int cpu)
 		}
 	}
 
-	put_cpu();
+	put_online_cpus_atomic();
 }
 
 void flush_dcache_page_all(struct mm_struct *mm, struct page *page)
@@ -933,7 +935,7 @@ void flush_dcache_page_all(struct mm_struct *mm, struct page *page)
 	if (tlb_type == hypervisor)
 		return;
 
-	preempt_disable();
+	get_online_cpus_atomic();
 
 #ifdef CONFIG_DEBUG_DCFLUSH
 	atomic_inc(&dcpage_flushes);
@@ -958,7 +960,7 @@ void flush_dcache_page_all(struct mm_struct *mm, struct page *page)
 	}
 	__local_flush_dcache_page(page);
 
-	preempt_enable();
+	put_online_cpus_atomic();
 }
 
 void __irq_entry smp_new_mmu_context_version_client(int irq, struct pt_regs *regs)
@@ -1150,6 +1152,7 @@ void smp_capture(void)
 {
 	int result = atomic_add_ret(1, &smp_capture_depth);
 
+	get_online_cpus_atomic();
 	if (result == 1) {
 		int ncpus = num_online_cpus();
 
@@ -1166,6 +1169,7 @@ void smp_capture(void)
 		printk("done\n");
 #endif
 	}
+	put_online_cpus_atomic();
 }
 
 void smp_release(void)
