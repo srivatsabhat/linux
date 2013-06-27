@@ -11,6 +11,7 @@
 #include <linux/interrupt.h>
 #include <linux/percpu.h>
 #include <linux/smp.h>
+#include <linux/cpu.h>
 #include <linux/irq.h>
 
 #include <asm/smtc_ipi.h>
@@ -84,6 +85,8 @@ static int mips_next_event(unsigned long delta,
 	unsigned long nextcomp = 0L;
 	int vpe = current_cpu_data.vpe_id;
 	int cpu = smp_processor_id();
+
+	get_online_cpus_atomic();
 	local_irq_save(flags);
 	mtflags = dmt();
 
@@ -164,6 +167,7 @@ static int mips_next_event(unsigned long delta,
 	}
 	emt(mtflags);
 	local_irq_restore(flags);
+	put_online_cpus_atomic();
 	return 0;
 }
 
@@ -177,6 +181,7 @@ void smtc_distribute_timer(int vpe)
 	unsigned long nextstamp;
 	unsigned long reference;
 
+	get_online_cpus_atomic();
 
 repeat:
 	nextstamp = 0L;
@@ -229,6 +234,8 @@ repeat:
 			> (unsigned long)LONG_MAX)
 				goto repeat;
 	}
+
+	put_online_cpus_atomic();
 }
 
 

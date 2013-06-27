@@ -14,6 +14,7 @@
 #include <linux/linkage.h>
 #include <linux/sched.h>
 #include <linux/smp.h>
+#include <linux/cpu.h>
 #include <linux/mm.h>
 #include <linux/module.h>
 #include <linux/bitops.h>
@@ -46,13 +47,13 @@
  */
 static inline void r4k_on_each_cpu(void (*func) (void *info), void *info)
 {
-	preempt_disable();
+	get_online_cpus_atomic();
 
 #if !defined(CONFIG_MIPS_MT_SMP) && !defined(CONFIG_MIPS_MT_SMTC)
 	smp_call_function(func, info, 1);
 #endif
 	func(info);
-	preempt_enable();
+	put_online_cpus_atomic();
 }
 
 #if defined(CONFIG_MIPS_CMP)

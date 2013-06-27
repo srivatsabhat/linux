@@ -21,6 +21,7 @@
 #include <linux/kernel.h>
 #include <linux/sched.h>
 #include <linux/smp.h>
+#include <linux/cpu.h>
 #include <linux/cpumask.h>
 #include <linux/interrupt.h>
 #include <linux/kernel_stat.h>
@@ -1143,6 +1144,8 @@ static irqreturn_t ipi_interrupt(int irq, void *dev_idm)
 	 * for the current TC, so we ought not to have to do it explicitly here.
 	 */
 
+	get_online_cpus_atomic();
+
 	for_each_online_cpu(cpu) {
 		if (cpu_data[cpu].vpe_id != my_vpe)
 			continue;
@@ -1179,6 +1182,8 @@ static irqreturn_t ipi_interrupt(int irq, void *dev_idm)
 			}
 		}
 	}
+
+	put_online_cpus_atomic();
 
 	return IRQ_HANDLED;
 }
@@ -1383,6 +1388,7 @@ void smtc_get_new_mmu_context(struct mm_struct *mm, unsigned long cpu)
 	 * them, let's be really careful...
 	 */
 
+	get_online_cpus_atomic();
 	local_irq_save(flags);
 	if (smtc_status & SMTC_TLB_SHARED) {
 		mtflags = dvpe();
@@ -1438,6 +1444,7 @@ void smtc_get_new_mmu_context(struct mm_struct *mm, unsigned long cpu)
 	else
 		emt(mtflags);
 	local_irq_restore(flags);
+	put_online_cpus_atomic();
 }
 
 /*
@@ -1496,6 +1503,7 @@ void smtc_cflush_lockdown(void)
 {
 	int cpu;
 
+	get_online_cpus_atomic();
 	for_each_online_cpu(cpu) {
 		if (cpu != smp_processor_id()) {
 			settc(cpu_data[cpu].tc_id);
@@ -1504,6 +1512,7 @@ void smtc_cflush_lockdown(void)
 		}
 	}
 	mips_ihb();
+	put_online_cpus_atomic();
 }
 
 /* It would be cheating to change the cpu_online states during a flush! */
@@ -1511,6 +1520,8 @@ void smtc_cflush_lockdown(void)
 void smtc_cflush_release(void)
 {
 	int cpu;
+
+	get_online_cpus_atomic();
 
 	/*
 	 * Start with a hazard barrier to ensure
@@ -1525,4 +1536,5 @@ void smtc_cflush_release(void)
 		}
 	}
 	mips_ihb();
+	put_online_cpus_atomic();
 }
