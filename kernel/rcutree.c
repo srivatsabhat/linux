@@ -794,7 +794,17 @@ static int rcu_implicit_dynticks_qs(struct rcu_data *rdp)
 	if (ULONG_CMP_GE(rdp->rsp->gp_start + 2, jiffies))
 		return 0;  /* Grace period is not old enough. */
 	barrier();
-	if (cpu_is_offline(rdp->cpu)) {
+
+	/*
+	 * It is safe to use the _nocheck() version of cpu_is_offline() here
+	 * (to avoid false-positive warnings from CPU hotplug debug code),
+	 * because:
+	 * 1. rcu_gp_init() holds off CPU hotplug operations during grace
+	 *    period initialization.
+	 * 2. The current grace period has not ended yet.
+	 * So it is safe to sample the offline state without synchronization.
+	 */
+	if (cpu_is_offline_nocheck(rdp->cpu)) {
 		trace_rcu_fqs(rdp->rsp->name, rdp->gpnum, rdp->cpu, "ofl");
 		rdp->offline_fqs++;
 		return 1;
