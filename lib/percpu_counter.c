@@ -98,9 +98,16 @@ s64 __percpu_counter_sum(struct percpu_counter *fbc)
 	s64 ret;
 	int cpu;
 
+	/*
+	 * CPU hotplug synchronization is explicitly handled via the
+	 * hotplug callback, which synchronizes through fbc->lock.
+	 * So it is safe to use the _nocheck() version of
+	 * for_each_online_cpu() here (to avoid false-positive warnings
+	 * from the CPU hotplug debug code).
+	 */
 	raw_spin_lock(&fbc->lock);
 	ret = fbc->count;
-	for_each_online_cpu(cpu) {
+	for_each_online_cpu_nocheck(cpu) {
 		s32 *pcount = per_cpu_ptr(fbc->counters, cpu);
 		ret += *pcount;
 	}
