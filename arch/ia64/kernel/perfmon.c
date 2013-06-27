@@ -6476,9 +6476,12 @@ pfm_install_alt_pmu_interrupt(pfm_intr_handler_desc_t *hdl)
 	/* do the easy test first */
 	if (pfm_alt_intr_handler) return -EBUSY;
 
+	get_online_cpus_atomic();
+
 	/* one at a time in the install or remove, just fail the others */
 	if (!spin_trylock(&pfm_alt_install_check)) {
-		return -EBUSY;
+		ret = -EBUSY;
+		goto out;
 	}
 
 	/* reserve our session */
@@ -6498,6 +6501,7 @@ pfm_install_alt_pmu_interrupt(pfm_intr_handler_desc_t *hdl)
 	pfm_alt_intr_handler = hdl;
 
 	spin_unlock(&pfm_alt_install_check);
+	put_online_cpus_atomic();
 
 	return 0;
 
@@ -6510,6 +6514,8 @@ cleanup_reserve:
 	}
 
 	spin_unlock(&pfm_alt_install_check);
+out:
+	put_online_cpus_atomic();
 
 	return ret;
 }
