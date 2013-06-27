@@ -187,7 +187,7 @@ static void kexec_prepare_cpus_wait(int wait_state)
 	int my_cpu, i, notified=-1;
 
 	hw_breakpoint_disable();
-	my_cpu = get_cpu();
+	my_cpu = get_online_cpus_atomic();
 	/* Make sure each CPU has at least made it to the state we need.
 	 *
 	 * FIXME: There is a (slim) chance of a problem if not all of the CPUs
@@ -266,7 +266,7 @@ static void kexec_prepare_cpus(void)
 	 */
 	kexec_prepare_cpus_wait(KEXEC_STATE_REAL_MODE);
 
-	put_cpu();
+	put_online_cpus_atomic();
 }
 
 #else /* ! SMP */
