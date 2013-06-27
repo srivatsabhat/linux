@@ -87,6 +87,7 @@ extern const struct cpumask *const cpu_active_mask;
 #define num_present_cpus()	cpumask_weight(cpu_present_mask)
 #define num_active_cpus()	cpumask_weight(cpu_active_mask)
 #define cpu_online(cpu)		cpumask_test_cpu((cpu), cpu_online_mask)
+#define cpu_online_nocheck(cpu)	cpumask_test_cpu_nocheck((cpu), cpu_online_mask)
 #define cpu_possible(cpu)	cpumask_test_cpu((cpu), cpu_possible_mask)
 #define cpu_present(cpu)	cpumask_test_cpu((cpu), cpu_present_mask)
 #define cpu_active(cpu)		cpumask_test_cpu((cpu), cpu_active_mask)
@@ -96,6 +97,7 @@ extern const struct cpumask *const cpu_active_mask;
 #define num_present_cpus()	1U
 #define num_active_cpus()	1U
 #define cpu_online(cpu)		((cpu) == 0)
+#define cpu_online_nocheck(cpu)	cpu_online((cpu))
 #define cpu_possible(cpu)	((cpu) == 0)
 #define cpu_present(cpu)	((cpu) == 0)
 #define cpu_active(cpu)		((cpu) == 0)
@@ -156,6 +158,8 @@ static inline unsigned int cpumask_any_but(const struct cpumask *mask,
 
 #define for_each_cpu(cpu, mask)			\
 	for ((cpu) = 0; (cpu) < 1; (cpu)++, (void)mask)
+#define for_each_cpu_nocheck(cpu, mask)		\
+			for_each_cpu((cpu), (mask))
 #define for_each_cpu_not(cpu, mask)		\
 	for ((cpu) = 0; (cpu) < 1; (cpu)++, (void)mask)
 #define for_each_cpu_and(cpu, mask, and)	\
@@ -191,6 +195,24 @@ static inline unsigned int cpumask_next(int n, const struct cpumask *srcp)
 }
 
 /**
+ * cpumask_next_nocheck - get the next cpu in a cpumask, without checking
+ * 			  for hotplug safety
+ * @n: the cpu prior to the place to search (ie. return will be > @n)
+ * @srcp: the cpumask pointer
+ *
+ * Returns >= nr_cpu_ids if no further cpus set.
+ */
+static inline unsigned int cpumask_next_nocheck(int n,
+						const struct cpumask *srcp)
+{
+	/* -1 is a legal arg here. */
+	if (n != -1)
+		cpumask_check(n);
+
+	return find_next_bit(cpumask_bits(srcp), nr_cpumask_bits, n+1);
+}
+
+/**
  * cpumask_next_zero - get the next unset cpu in a cpumask
  * @n: the cpu prior to the place to search (ie. return will be > @n)
  * @srcp: the cpumask pointer
@@ -221,6 +243,21 @@ int cpumask_any_but(const struct cpumask *mask, unsigned int cpu);
 	for ((cpu) = -1;				\
 		(cpu) = cpumask_next((cpu), (mask)),	\
 		(cpu) < nr_cpu_ids;)
+
+
+/**
+ * for_each_cpu_nocheck - iterate over every cpu in a mask,
+ * 			  without checking for hotplug safety
+ * @cpu: the (optionally unsigned) integer iterator
+ * @mask: the cpumask pointer
+ *
+ * After the loop, cpu is >= nr_cpu_ids.
+ */
+#define for_each_cpu_nocheck(cpu, mask)				\
+	for ((cpu) = -1;					\
+		(cpu) = cpumask_next_nocheck((cpu), (mask)),	\
+		(cpu) < nr_cpu_ids;)
+
 
 /**
  * for_each_cpu_not - iterate over every cpu in a complemented mask
@@ -298,6 +335,25 @@ static inline void cpumask_clear_cpu(int cpu, struct cpumask *dstp)
 	int __ret;						\
 								\
 	check_hotplug_safe_cpu(cpu, cpumask);			\
+	__ret = test_bit(cpumask_check(cpu),			\
+				cpumask_bits((cpumask)));	\
+	__ret;							\
+})
+
+/**
+ * cpumask_test_cpu_nocheck - test for a cpu in a cpumask, without
+ * 			      checking for hotplug safety
+ * @cpu: cpu number (< nr_cpu_ids)
+ * @cpumask: the cpumask pointer
+ *
+ * Returns 1 if @cpu is set in @cpumask, else returns 0
+ *
+ * No static inline type checking - see Subtlety (1) above.
+ */
+#define cpumask_test_cpu_nocheck(cpu, cpumask)			\
+({								\
+	int __ret;						\
+								\
 	__ret = test_bit(cpumask_check(cpu),			\
 				cpumask_bits((cpumask)));	\
 	__ret;							\
@@ -775,6 +831,8 @@ extern const DECLARE_BITMAP(cpu_all_bits, NR_CPUS);
 
 #define for_each_possible_cpu(cpu) for_each_cpu((cpu), cpu_possible_mask)
 #define for_each_online_cpu(cpu)   for_each_cpu((cpu), cpu_online_mask)
+#define for_each_online_cpu_nocheck(cpu)				   \
+				for_each_cpu_nocheck((cpu), cpu_online_mask)
 #define for_each_present_cpu(cpu)  for_each_cpu((cpu), cpu_present_mask)
 
 /* Wrappers for arch boot code to manipulate normally-constant masks */
@@ -823,6 +881,7 @@ static inline const struct cpumask *get_cpu_mask(unsigned int cpu)
 }
 
 #define cpu_is_offline(cpu)	unlikely(!cpu_online(cpu))
+#define cpu_is_offline_nocheck(cpu)	unlikely(!cpu_online_nocheck(cpu))
 
 #if NR_CPUS <= BITS_PER_LONG
 #define CPU_BITS_ALL						\
