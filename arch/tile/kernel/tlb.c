@@ -14,6 +14,7 @@
  */
 
 #include <linux/cpumask.h>
+#include <linux/cpu.h>
 #include <linux/module.h>
 #include <linux/hugetlb.h>
 #include <asm/tlbflush.h>
@@ -35,6 +36,8 @@ void flush_tlb_mm(struct mm_struct *mm)
 {
 	HV_Remote_ASID asids[NR_CPUS];
 	int i = 0, cpu;
+
+	get_online_cpus_atomic();
 	for_each_cpu(cpu, mm_cpumask(mm)) {
 		HV_Remote_ASID *asid = &asids[i++];
 		asid->y = cpu / smp_topology.width;
@@ -43,6 +46,7 @@ void flush_tlb_mm(struct mm_struct *mm)
 	}
 	flush_remote(0, HV_FLUSH_EVICT_L1I, mm_cpumask(mm),
 		     0, 0, 0, NULL, asids, i);
+	put_online_cpus_atomic();
 }
 
 void flush_tlb_current_task(void)
@@ -55,8 +59,11 @@ void flush_tlb_page_mm(struct vm_area_struct *vma, struct mm_struct *mm,
 {
 	unsigned long size = vma_kernel_pagesize(vma);
 	int cache = (vma->vm_flags & VM_EXEC) ? HV_FLUSH_EVICT_L1I : 0;
+
+	get_online_cpus_atomic();
 	flush_remote(0, cache, mm_cpumask(mm),
 		     va, size, size, mm_cpumask(mm), NULL, 0);
+	put_online_cpus_atomic();
 }
 
 void flush_tlb_page(struct vm_area_struct *vma, unsigned long va)
@@ -71,13 +78,18 @@ void flush_tlb_range(struct vm_area_struct *vma,
 	unsigned long size = vma_kernel_pagesize(vma);
 	struct mm_struct *mm = vma->vm_mm;
 	int cache = (vma->vm_flags & VM_EXEC) ? HV_FLUSH_EVICT_L1I : 0;
+
+	get_online_cpus_atomic();
 	flush_remote(0, cache, mm_cpumask(mm), start, end - start, size,
 		     mm_cpumask(mm), NULL, 0);
+	put_online_cpus_atomic();
 }
 
 void flush_tlb_all(void)
 {
 	int i;
+
+	get_online_cpus_atomic();
 	for (i = 0; ; ++i) {
 		HV_VirtAddrRange r = hv_inquire_virtual(i);
 		if (r.size == 0)
@@ -89,10 +101,13 @@ void flush_tlb_all(void)
 			     r.start, r.size, HPAGE_SIZE, cpu_online_mask,
 			     NULL, 0);
 	}
+	put_online_cpus_atomic();
 }
 
 void flush_tlb_kernel_range(unsigned long start, unsigned long end)
 {
+	get_online_cpus_atomic();
 	flush_remote(0, HV_FLUSH_EVICT_L1I, cpu_online_mask,
 		     start, end - start, PAGE_SIZE, cpu_online_mask, NULL, 0);
+	put_online_cpus_atomic();
 }
