@@ -84,6 +84,8 @@ static inline int get_pageblock_migratetype(struct page *page)
 	return get_pageblock_flags_group(page, PB_migrate, PB_migrate_end);
 }
 
+#define MAX_MEMPWR_MIGRATE_PAGES	32
+
 struct mem_region_list {
 	struct list_head	*page_block;
 	unsigned long		nr_free;
