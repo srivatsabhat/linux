@@ -635,6 +635,37 @@ out:
 	return prev_region_id;
 }
 
+
+static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
+				    int region_id);
+
+
+static inline int can_return_region(struct mem_region_list *region, int order)
+{
+	struct zone_mem_region *zone_region;
+
+	zone_region = region->zone_region;
+
+	if (likely(zone_region->nr_free != zone_region->present_pages))
+		return 0;
+
+	/*
+	 * Don't release freepages to the region allocator if some other
+	 * buddy pages can potentially merge with our freepages to form
+	 * higher order pages.
+	 *
+	 * Hack: Don't return the region unless all the freepages are of
+	 * order MAX_ORDER-1.
+	 */
+	if (likely(order != MAX_ORDER-1))
+		return 0;
+
+	if (region->nr_free * (1 << order) != zone_region->nr_free)
+		return 0;
+
+	return 1;
+}
+
 static void add_to_freelist(struct page *page, struct free_list *free_list,
 			    int order)
 {
@@ -651,7 +682,7 @@ static void add_to_freelist(struct page *page, struct free_list *free_list,
 
 	if (region->page_block) {
 		list_add_tail(lru, region->page_block);
-		return;
+		goto try_return_region;
 	}
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
@@ -691,6 +722,15 @@ out:
 	/* Save pointer to page block of this region */
 	region->page_block = lru;
 	set_region_bit(region_id, free_list);
+
+try_return_region:
+
+	/*
+	 * Try to return the freepages of a memory region to the region
+	 * allocator, if possible.
+	 */
+	if (can_return_region(region, order))
+		add_to_region_allocator(page_zone(page), free_list, region_id);
 }
 
 /*
