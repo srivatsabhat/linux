@@ -1793,9 +1793,8 @@ retry:
  * a single hold of the lock, for efficiency.  Add them to the supplied list.
  * Returns the number of new pages which were placed at *list.
  */
-static int rmqueue_bulk(struct zone *zone, unsigned int order,
-			unsigned long count, struct list_head *list,
-			int migratetype, int cold)
+int rmqueue_bulk(struct zone *zone, unsigned int order, unsigned long count,
+		 struct list_head *list, int migratetype, int cold)
 {
 	int mt = migratetype, i;
 
@@ -2111,6 +2110,20 @@ static int __isolate_free_page(struct page *page, unsigned int order)
 	return 1UL << order;
 }
 
+
+/*
+ * The page is already free and isolated (removed) from the buddy system.
+ * Set up the refcounts appropriately. Note that we can't use page_order()
+ * here, since the buddy system would have invoked rmv_page_order() before
+ * giving the page.
+ */
+void __split_free_page(struct page *page, unsigned int order)
+{
+	/* Split into individual pages */
+	set_page_refcounted(page);
+	split_page(page, order);
+}
+
 /*
  * Similar to split_page except the page is already free. As this is only
  * being used for migration, the migratetype of the block also changes.
@@ -2132,9 +2145,7 @@ int split_free_page(struct page *page)
 	if (!nr_pages)
 		return 0;
 
-	/* Split into individual pages */
-	set_page_refcounted(page);
-	split_page(page, order);
+	__split_free_page(page, order);
 	return nr_pages;
 }
 
