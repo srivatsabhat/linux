@@ -112,6 +112,21 @@ struct free_area {
 	unsigned long		nr_free;
 };
 
+/* A simplified free_area for managing entire memory regions */
+struct free_area_region {
+	struct list_head	list;
+	unsigned long		nr_free;
+};
+
+struct mem_region {
+	struct free_area_region	region_area[MAX_ORDER];
+};
+
+struct region_allocator {
+	struct mem_region	region[MAX_NR_ZONE_REGIONS];
+	int			next_region;
+};
+
 struct pglist_data;
 
 /*
@@ -404,6 +419,8 @@ struct zone {
 
 	struct zone_mem_region	zone_regions[MAX_NR_ZONE_REGIONS];
 	int 			nr_zone_regions;
+
+	struct region_allocator	region_allocator;
 
 #ifndef CONFIG_SPARSEMEM
 	/*
