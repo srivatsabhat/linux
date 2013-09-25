@@ -1211,8 +1211,9 @@ static inline
 struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 						int migratetype)
 {
-	unsigned int current_order;
-	struct free_area *area;
+	unsigned int current_order, alloc_order;
+	struct free_area *area, *other_area;
+	int alloc_region, other_region;
 	struct page *page;
 
 	/* Find a page of the appropriate size in the preferred list */
@@ -1221,17 +1222,40 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 		if (list_empty(&area->free_list[migratetype].list))
 			continue;
 
-		page = list_entry(area->free_list[migratetype].list.next,
-							struct page, lru);
-		rmqueue_del_from_freelist(page, &area->free_list[migratetype],
-					  current_order);
-		rmv_page_order(page);
-		area->nr_free--;
-		expand(zone, page, order, current_order, area, migratetype);
-		return page;
+		alloc_order = current_order;
+		alloc_region = area->free_list[migratetype].next_region -
+				area->free_list[migratetype].mr_list;
+		current_order++;
+		goto try_others;
 	}
 
 	return NULL;
+
+try_others:
+	/* Try to aggressively prefer lower numbered regions for allocations */
+	for ( ; current_order < MAX_ORDER; ++current_order) {
+		other_area = &(zone->free_area[current_order]);
+		if (list_empty(&other_area->free_list[migratetype].list))
+			continue;
+
+		other_region = other_area->free_list[migratetype].next_region -
+				other_area->free_list[migratetype].mr_list;
+
+		if (other_region < alloc_region) {
+			alloc_region = other_region;
+			alloc_order = current_order;
+		}
+	}
+
+	area = &(zone->free_area[alloc_order]);
+	page = list_entry(area->free_list[migratetype].list.next, struct page,
+			  lru);
+	rmqueue_del_from_freelist(page, &area->free_list[migratetype],
+				  alloc_order);
+	rmv_page_order(page);
+	area->nr_free--;
+	expand(zone, page, order, alloc_order, area, migratetype);
+	return page;
 }
 
 
