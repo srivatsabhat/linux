@@ -6893,46 +6893,21 @@ static unsigned long pfn_max_align_up(unsigned long pfn)
 static int __alloc_contig_migrate_range(struct compact_control *cc,
 					unsigned long start, unsigned long end)
 {
-	/* This function is based on compact_zone() from compaction.c. */
-	unsigned long nr_reclaimed;
-	unsigned long pfn = start;
-	unsigned int tries = 0;
-	int ret = 0;
+	struct aggression_control ac = {
+		.isolate_unevictable = true,
+		.prep_all = true,
+		.reclaim_clean = true,
+		.max_tries = 5,
+		.reason = MR_CMA,
+	};
 
-	migrate_prep();
+	struct free_page_control fc = {
+		.free_page_alloc = alloc_migrate_target,
+		.alloc_data = 0,
+		.release_freepages = NULL,
+	};
 
-	while (pfn < end || !list_empty(&cc->migratepages)) {
-		if (fatal_signal_pending(current)) {
-			ret = -EINTR;
-			break;
-		}
-
-		if (list_empty(&cc->migratepages)) {
-			cc->nr_migratepages = 0;
-			pfn = isolate_migratepages_range(cc->zone, cc,
-							 pfn, end, true);
-			if (!pfn) {
-				ret = -EINTR;
-				break;
-			}
-			tries = 0;
-		} else if (++tries == 5) {
-			ret = ret < 0 ? ret : -EBUSY;
-			break;
-		}
-
-		nr_reclaimed = reclaim_clean_pages_from_list(cc->zone,
-							&cc->migratepages);
-		cc->nr_migratepages -= nr_reclaimed;
-
-		ret = migrate_pages(&cc->migratepages, alloc_migrate_target,
-				    0, MIGRATE_SYNC, MR_CMA);
-	}
-	if (ret < 0) {
-		putback_movable_pages(&cc->migratepages);
-		return ret;
-	}
-	return 0;
+	return compact_range(cc, &ac, &fc, start, end);
 }
 
 /**
