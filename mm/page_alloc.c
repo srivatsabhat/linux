@@ -1003,24 +1003,18 @@ static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
 		*next_region = region_id;
 }
 
-/* Delete freepages from the region allocator and add them to buddy freelists */
-static int del_from_region_allocator(struct zone *zone, unsigned int order,
-				     int migratetype)
+static void __del_from_region_allocator(struct zone *zone, unsigned int order,
+					int migratetype, int region_id)
 {
 	struct region_allocator *reg_alloc;
 	struct free_area_region *reg_area;
 	struct list_head *ralloc_list;
 	struct free_list *free_list;
 	unsigned long nr_pages;
-	int next_region;
+	struct page *page;
 
 	reg_alloc = &zone->region_allocator;
-
-	next_region = reg_alloc->next_region;
-	if (next_region < 0)
-		return -ENOMEM;
-
-	reg_area = &reg_alloc->region[next_region].region_area[order];
+	reg_area = &reg_alloc->region[region_id].region_area[order];
 	ralloc_list = &reg_area->list;
 
 	list_for_each_entry(page, ralloc_list, lru)
@@ -1029,20 +1023,34 @@ static int del_from_region_allocator(struct zone *zone, unsigned int order,
 	free_list = &zone->free_area[order].free_list[migratetype];
 
 	nr_pages = add_to_freelist_bulk(ralloc_list, free_list, order,
-					next_region);
+					region_id);
 
 	reg_area->nr_free -= nr_pages;
 	WARN_ON(reg_area->nr_free != 0);
 
 	/* Pick a new next_region */
-	clear_bit(next_region, reg_alloc->ralloc_mask);
-	next_region = find_first_bit(reg_alloc->ralloc_mask,
+	clear_bit(region_id, reg_alloc->ralloc_mask);
+	region_id = find_first_bit(reg_alloc->ralloc_mask,
 				     MAX_NR_ZONE_REGIONS);
 
-	if (next_region >= MAX_NR_ZONE_REGIONS)
-		next_region = -1; /* No free regions available */
+	if (region_id >= MAX_NR_ZONE_REGIONS)
+		region_id = -1; /* No free regions available */
 
-	reg_alloc->next_region = next_region;
+	reg_alloc->next_region = region_id;
+}
+
+/* Delete freepages from the region allocator and add them to buddy freelists */
+static int del_from_region_allocator(struct zone *zone, unsigned int order,
+				     int migratetype)
+{
+	int next_region;
+
+	next_region = zone->region_allocator.next_region;
+
+	if (next_region < 0)
+		return -ENOMEM;
+
+	__del_from_region_allocator(zone, order, migratetype, next_region);
 
 	return 0;
 }
