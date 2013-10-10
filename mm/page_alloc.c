@@ -4885,6 +4885,24 @@ static void __meminit init_node_memory_regions(struct pglist_data *pgdat)
 	pgdat->nr_node_regions = idx;
 }
 
+/*
+ * Zone-region indices are used to map node-memory-regions to
+ * zone-memory-regions. Initialize all of them to an invalid value (-1),
+ * to make way for the correct mapping to be set up subsequently.
+ */
+static void __meminit init_zone_region_indices(struct pglist_data *pgdat)
+{
+	struct node_mem_region *node_region;
+	int i, j;
+
+	for (i = 0; i < pgdat->nr_node_regions; i++) {
+		node_region = &pgdat->node_regions[i];
+
+		for (j = 0; j < pgdat->nr_zones; j++)
+			node_region->zone_region_idx[j] = -1;
+	}
+}
+
 static void __meminit init_zone_memory_regions(struct pglist_data *pgdat)
 {
 	unsigned long start_pfn, end_pfn, absent;
@@ -4893,6 +4911,9 @@ static void __meminit init_zone_memory_regions(struct pglist_data *pgdat)
 	struct node_mem_region *node_region;
 	struct zone_mem_region *zone_region;
 	struct zone *z;
+
+	/* Set all the zone-region indices to -1 */
+	init_zone_region_indices(pgdat);
 
 	for (i = 0, j = 0; i < pgdat->nr_zones; i++) {
 		z = &pgdat->node_zones[i];
@@ -4926,6 +4947,7 @@ static void __meminit init_zone_memory_regions(struct pglist_data *pgdat)
 			zone_region->present_pages =
 					zone_region->spanned_pages - absent;
 
+			node_region->zone_region_idx[zone_idx(z)] = idx;
 			idx++;
 		}
 
