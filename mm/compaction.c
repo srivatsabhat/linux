@@ -16,6 +16,7 @@
 #include <linux/sysfs.h>
 #include <linux/balloon_compaction.h>
 #include <linux/page-isolation.h>
+#include <linux/kthread.h>
 #include "internal.h"
 
 #ifdef CONFIG_COMPACTION
@@ -1274,6 +1275,85 @@ int evacuate_mem_region(struct zone *z, struct zone_mem_region *zmr)
 	return compact_range(&cc, &ac, &fc, start_pfn, end_pfn);
 }
 
+#define nr_zone_region_bits	MAX_NR_ZONE_REGIONS
+static DECLARE_BITMAP(mpwork_mask, nr_zone_region_bits);
+
+static void kmempowerd(struct kthread_work *work)
+{
+	struct mempower_work *mpwork;
+	struct zone *zone;
+	unsigned long flags;
+	int region_id;
+
+	mpwork = container_of(work, struct mempower_work, work);
+	zone = container_of(mpwork, struct zone, mempower_work);
+
+	spin_lock_irqsave(&mpwork->lock, flags);
+repeat:
+	bitmap_copy(mpwork_mask, mpwork->mempower_mask, nr_zone_region_bits);
+	spin_unlock_irqrestore(&mpwork->lock, flags);
+
+	if (bitmap_empty(mpwork_mask, nr_zone_region_bits))
+		return;
+
+	for_each_set_bit(region_id, mpwork_mask, nr_zone_region_bits)
+		evacuate_mem_region(zone, &zone->zone_regions[region_id]);
+
+	spin_lock_irqsave(&mpwork->lock, flags);
+
+	bitmap_andnot(mpwork->mempower_mask, mpwork->mempower_mask, mpwork_mask,
+		      nr_zone_region_bits);
+	if (!bitmap_empty(mpwork->mempower_mask, nr_zone_region_bits))
+		goto repeat; /* More work got added in the meanwhile */
+
+	spin_unlock_irqrestore(&mpwork->lock, flags);
+
+}
+
+static void kmempowerd_run(int nid)
+{
+	struct kthread_worker *worker;
+	struct mempower_work *mpwork;
+	struct pglist_data *pgdat;
+	struct task_struct *task;
+	unsigned long flags;
+	int i;
+
+	pgdat = NODE_DATA(nid);
+	worker = &pgdat->mempower_worker;
+
+	init_kthread_worker(worker);
+
+	task = kthread_create_on_node(kthread_worker_fn, worker, nid,
+				      "kmempowerd/%d", nid);
+	if (IS_ERR(task))
+		return;
+
+	for (i = 0; i < pgdat->nr_zones; i++) {
+		mpwork = &pgdat->node_zones[i].mempower_work;
+		init_kthread_work(&mpwork->work, kmempowerd);
+
+		spin_lock_init(&mpwork->lock);
+
+		/* Initialize bitmap to zero to indicate no-pending-work */
+		spin_lock_irqsave(&mpwork->lock, flags);
+		bitmap_zero(mpwork->mempower_mask, nr_zone_region_bits);
+		spin_unlock_irqrestore(&mpwork->lock, flags);
+	}
+
+	wake_up_process(task);
+}
+
+int kmempowerd_init(void)
+{
+	int nid;
+
+	for_each_node_state(nid, N_MEMORY)
+		kmempowerd_run(nid);
+
+	return 0;
+}
+module_init(kmempowerd_init);
 
 /* Compact all zones within a node */
 static void __compact_pgdat(pg_data_t *pgdat, struct compact_control *cc)
