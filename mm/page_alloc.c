@@ -5240,6 +5240,23 @@ static void __meminit init_node_memory_regions(struct pglist_data *pgdat)
 	pgdat->nr_node_regions = idx;
 }
 
+static void __meminit init_zone_region_allocator(struct zone *zone)
+{
+	struct free_area_region *area;
+	int i, j;
+
+	for (i = 0; i < zone->nr_zone_regions; i++) {
+		area = zone->region_allocator.region[i].region_area;
+
+		for (j = 0; j < MAX_ORDER; j++) {
+			INIT_LIST_HEAD(&area[j].list);
+			area[j].nr_free = 0;
+		}
+	}
+
+	zone->region_allocator.next_region = -1;
+}
+
 static void __meminit zone_init_free_lists_late(struct zone *zone)
 {
 	struct mem_region_list *mr_list;
@@ -5325,6 +5342,8 @@ static void __meminit init_zone_memory_regions(struct pglist_data *pgdat)
 		z->nr_zone_regions = idx;
 
 		zone_init_free_lists_late(z);
+
+		init_zone_region_allocator(z);
 
 		/*
 		 * Revisit the last visited node memory region, in case it
