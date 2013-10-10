@@ -1175,6 +1175,105 @@ unsigned long try_to_compact_pages(struct zonelist *zonelist,
 	return rc;
 }
 
+static struct page *power_mgmt_alloc(struct page *migratepage,
+				     unsigned long data, int **result)
+{
+	struct compact_control *cc = (struct compact_control *)data;
+	struct page *freepage;
+
+	/*
+	 * Try to allocate pages from lower memory regions. If it fails,
+	 * abort.
+	 */
+	if (list_empty(&cc->freepages)) {
+		struct zone *z = page_zone(migratepage);
+		unsigned int i, count, order = 0;
+		struct page *page, *tmp;
+		LIST_HEAD(list);
+
+		/* Get a bunch of order-0 pages from the buddy freelists */
+		count = rmqueue_bulk(z, order, cc->nr_migratepages, &list,
+				     MIGRATE_MOVABLE, 1);
+
+		cc->nr_freepages = count * (1ULL << order);
+
+		if (list_empty(&list))
+			return NULL;
+
+		list_for_each_entry_safe(page, tmp, &list, lru) {
+			__split_free_page(page, order);
+
+			list_move_tail(&page->lru, &cc->freepages);
+
+			/*
+			 * Now add all the order-0 subdivisions of this page
+			 * to the freelist as well.
+			 */
+			for (i = 1; i < (1ULL << order); i++) {
+				page++;
+				list_add(&page->lru, &cc->freepages);
+			}
+
+		}
+
+		VM_BUG_ON(!list_empty(&list));
+
+		/* Now map all the order-0 pages on the freelist. */
+		map_pages(&cc->freepages);
+	}
+
+	freepage = list_entry(cc->freepages.next, struct page, lru);
+
+	if (page_zone_region_id(freepage) >= page_zone_region_id(migratepage))
+		return NULL; /* Freepage is not from lower region, so abort */
+
+	list_del(&freepage->lru);
+	cc->nr_freepages--;
+
+	return freepage;
+}
+
+static unsigned long power_mgmt_release_freepages(unsigned long info)
+{
+	struct compact_control *cc = (struct compact_control *)info;
+
+	return release_freepages(&cc->freepages);
+}
+
+int evacuate_mem_region(struct zone *z, struct zone_mem_region *zmr)
+{
+	unsigned long start_pfn = zmr->start_pfn;
+	unsigned long end_pfn = zmr->end_pfn;
+
+	struct compact_control cc = {
+		.nr_migratepages = 0,
+		.order = -1,
+		.zone = page_zone(pfn_to_page(start_pfn)),
+		.sync = false,  /* Async migration */
+		.ignore_skip_hint = true,
+	};
+
+	struct aggression_control ac = {
+		.isolate_unevictable = false,
+		.prep_all = false,
+		.reclaim_clean = true,
+		.max_tries = 1,
+		.reason = MR_PWR_MGMT,
+	};
+
+	struct free_page_control fc = {
+		.free_page_alloc = power_mgmt_alloc,
+		.alloc_data = (unsigned long)&cc,
+		.release_freepages = power_mgmt_release_freepages,
+		.free_data = (unsigned long)&cc,
+	};
+
+	INIT_LIST_HEAD(&cc.migratepages);
+	INIT_LIST_HEAD(&cc.freepages);
+
+	return compact_range(&cc, &ac, &fc, start_pfn, end_pfn);
+}
+
 
 /* Compact all zones within a node */
 static void __compact_pgdat(pg_data_t *pgdat, struct compact_control *cc)
