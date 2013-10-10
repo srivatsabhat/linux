@@ -1278,6 +1278,32 @@ int evacuate_mem_region(struct zone *z, struct zone_mem_region *zmr)
 #define nr_zone_region_bits	MAX_NR_ZONE_REGIONS
 static DECLARE_BITMAP(mpwork_mask, nr_zone_region_bits);
 
+void queue_mempower_work(struct pglist_data *pgdat, struct zone *zone,
+			 int region_id)
+{
+	struct mempower_work *mpwork;
+	unsigned long flags;
+
+	mpwork = &zone->mempower_work;
+	spin_lock_irqsave(&mpwork->lock, flags);
+	set_bit(region_id, mpwork->mempower_mask);
+	spin_unlock_irqrestore(&mpwork->lock, flags);
+
+	/*
+	 * The kmempowerd kthread will never miss the work we assign it,
+	 * due to the way queue_kthread_work() and kthread_worker_fn()
+	 * synchronize with each other. If the work is currently executing,
+	 * it gets requeued; but if it is pending, the kthread will naturally
+	 * process it in the future. Eitherway, it will notice and process
+	 * all the work submitted to it, and won't prematurely go to sleep.
+	 *
+	 * Note: The bits set in the mempower_mask represent the actual
+	 * "work" for the kthread. The work-struct is just a container used
+	 * to communicate that work to the kthread.
+	 */
+	queue_kthread_work(&pgdat->mempower_worker, &mpwork->work);
+}
+
 static void kmempowerd(struct kthread_work *work)
 {
 	struct mempower_work *mpwork;
