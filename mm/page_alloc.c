@@ -935,7 +935,7 @@ static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
 	struct free_area_region *reg_area;
 	struct list_head *ralloc_list;
 	unsigned long nr_pages;
-	int order;
+	int order, *next_region;
 
 	if (WARN_ON(list_empty(&free_list->list)))
 		return;
@@ -952,6 +952,13 @@ static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
 
 	WARN_ON(reg_area->nr_free != 0);
 	reg_area->nr_free += nr_pages;
+
+	set_bit(region_id, reg_alloc->ralloc_mask);
+	next_region = &reg_alloc->next_region;
+
+	if ((*next_region < 0) ||
+			(*next_region > 0 && region_id < *next_region))
+		*next_region = region_id;
 }
 
 /* Delete freepages from the region allocator and add them to buddy freelists */
@@ -981,6 +988,16 @@ static int del_from_region_allocator(struct zone *zone, unsigned int order,
 
 	reg_area->nr_free -= nr_pages;
 	WARN_ON(reg_area->nr_free != 0);
+
+	/* Pick a new next_region */
+	clear_bit(next_region, reg_alloc->ralloc_mask);
+	next_region = find_first_bit(reg_alloc->ralloc_mask,
+				     MAX_NR_ZONE_REGIONS);
+
+	if (next_region >= MAX_NR_ZONE_REGIONS)
+		next_region = -1; /* No free regions available */
+
+	reg_alloc->next_region = next_region;
 
 	return 0;
 }
