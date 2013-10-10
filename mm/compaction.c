@@ -1304,9 +1304,26 @@ void queue_mempower_work(struct pglist_data *pgdat, struct zone *zone,
 	queue_kthread_work(&pgdat->mempower_worker, &mpwork->work);
 }
 
+int should_evacuate_region(struct zone *z, struct zone_mem_region *region)
+{
+	unsigned long pages_in_use;
+
+	/* Don't try to evacuate region 0, since its the target of migration */
+	if (region == z->zone_regions)
+		return 0;
+
+	pages_in_use = region->present_pages - region->nr_free;
+
+	if (pages_in_use > 0 && pages_in_use <= MAX_MEMPWR_MIGRATE_PAGES)
+		return 1;
+
+	return 0;
+}
+
 static void kmempowerd(struct kthread_work *work)
 {
 	struct mempower_work *mpwork;
+	struct zone_mem_region *zmr;
 	struct zone *zone;
 	unsigned long flags;
 	int region_id;
@@ -1322,8 +1339,12 @@ repeat:
 	if (bitmap_empty(mpwork_mask, nr_zone_region_bits))
 		return;
 
-	for_each_set_bit(region_id, mpwork_mask, nr_zone_region_bits)
-		evacuate_mem_region(zone, &zone->zone_regions[region_id]);
+	for_each_set_bit(region_id, mpwork_mask, nr_zone_region_bits) {
+		zmr = &zone->zone_regions[region_id];
+
+		if (should_evacuate_region(zone, zmr))
+			evacuate_mem_region(zone, zmr);
+	}
 
 	spin_lock_irqsave(&mpwork->lock, flags);
 
