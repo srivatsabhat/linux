@@ -1048,6 +1048,37 @@ static int del_from_region_allocator(struct zone *zone, unsigned int order,
 }
 
 /*
+ * Return 1 if the page is in the region allocator, else return 0
+ * (which usually means that the page is in the buddy freelists).
+ */
+static int page_in_region_allocator(struct page *page)
+{
+	struct region_allocator *reg_alloc;
+	struct free_area_region *reg_area;
+	int order, region_id;
+
+	/* We keep only MAX_ORDER-1 pages in the region allocator */
+	order = page_order(page);
+	if (order != MAX_ORDER-1)
+		return 0;
+
+	/*
+	 * It is sufficient to check if (any of) the pages belonging to
+	 * that region are in the region allocator, because a page resides
+	 * in the region allocator if and only if all the pages of that
+	 * region are also in the region allocator.
+	 */
+	region_id = page_zone_region_id(page);
+	reg_alloc = &page_zone(page)->region_allocator;
+	reg_area = &reg_alloc->region[region_id].region_area[order];
+
+	if (reg_area->nr_free)
+		return 1;
+
+	return 0;
+}
+
+/*
  * Freeing function for a buddy system allocator.
  *
  * The concept of a buddy system is to maintain direct-mapped table
