@@ -635,7 +635,8 @@ out:
 	return prev_region_id;
 }
 
-static void add_to_freelist(struct page *page, struct free_list *free_list)
+static void add_to_freelist(struct page *page, struct free_list *free_list,
+			    int order)
 {
 	struct list_head *prev_region_list, *lru;
 	struct mem_region_list *region;
@@ -646,6 +647,7 @@ static void add_to_freelist(struct page *page, struct free_list *free_list)
 
 	region = &free_list->mr_list[region_id];
 	region->nr_free++;
+	region->zone_region->nr_free += 1 << order;
 
 	if (region->page_block) {
 		list_add_tail(lru, region->page_block);
@@ -700,9 +702,10 @@ out:
  * inside the freelist.
  */
 static void rmqueue_del_from_freelist(struct page *page,
-				      struct free_list *free_list)
+				      struct free_list *free_list, int order)
 {
 	struct list_head *lru = &page->lru;
+	struct mem_region_list *mr_list;
 	int region_id;
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
@@ -712,8 +715,11 @@ static void rmqueue_del_from_freelist(struct page *page,
 
 	list_del(lru);
 
+	mr_list = free_list->next_region;
+	mr_list->zone_region->nr_free -= 1 << order;
+
 	/* Fastpath */
-	if (--(free_list->next_region->nr_free)) {
+	if (--(mr_list->nr_free)) {
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 		WARN(free_list->next_region->nr_free < 0,
@@ -735,7 +741,8 @@ static void rmqueue_del_from_freelist(struct page *page,
 }
 
 /* Generic delete function for region-aware buddy allocator. */
-static void del_from_freelist(struct page *page, struct free_list *free_list)
+static void del_from_freelist(struct page *page, struct free_list *free_list,
+			      int order)
 {
 	struct list_head *prev_page_lru, *lru, *p;
 	struct mem_region_list *region;
@@ -745,11 +752,12 @@ static void del_from_freelist(struct page *page, struct free_list *free_list)
 
 	/* Try to fastpath, if deleting from the head of the list */
 	if (lru == free_list->list.next)
-		return rmqueue_del_from_freelist(page, free_list);
+		return rmqueue_del_from_freelist(page, free_list, order);
 
 	region_id = page_zone_region_id(page);
 	region = &free_list->mr_list[region_id];
 	region->nr_free--;
+	region->zone_region->nr_free -= 1 << order;
 
 #ifdef CONFIG_DEBUG_PAGEALLOC
 	WARN(region->nr_free < 0, "%s: nr_free is negative\n", __func__);
@@ -804,10 +812,10 @@ page_found:
  * Move a given page from one freelist to another.
  */
 static void move_page_freelist(struct page *page, struct free_list *old_list,
-			       struct free_list *new_list)
+			       struct free_list *new_list, int order)
 {
-	del_from_freelist(page, old_list);
-	add_to_freelist(page, new_list);
+	del_from_freelist(page, old_list, order);
+	add_to_freelist(page, new_list, order);
 }
 
 /*
@@ -877,7 +885,7 @@ static inline void __free_one_page(struct page *page,
 
 			area = &zone->free_area[order];
 			mt = get_freepage_migratetype(buddy);
-			del_from_freelist(buddy, &area->free_list[mt]);
+			del_from_freelist(buddy, &area->free_list[mt], order);
 			area->nr_free--;
 			rmv_page_order(buddy);
 			set_freepage_migratetype(buddy, migratetype);
@@ -913,12 +921,13 @@ static inline void __free_one_page(struct page *page,
 			 * switch off this entire "is next-higher buddy free?"
 			 * logic when memory regions are used.
 			 */
-			add_to_freelist(page, &area->free_list[migratetype]);
+			add_to_freelist(page, &area->free_list[migratetype],
+					order);
 			goto out;
 		}
 	}
 
-	add_to_freelist(page, &area->free_list[migratetype]);
+	add_to_freelist(page, &area->free_list[migratetype], order);
 out:
 	area->nr_free++;
 }
@@ -1139,7 +1148,8 @@ static inline void expand(struct zone *zone, struct page *page,
 			continue;
 		}
 #endif
-		add_to_freelist(&page[size], &area->free_list[migratetype]);
+		add_to_freelist(&page[size], &area->free_list[migratetype],
+				high);
 		area->nr_free++;
 		set_page_order(&page[size], high);
 
@@ -1213,7 +1223,8 @@ struct page *__rmqueue_smallest(struct zone *zone, unsigned int order,
 
 		page = list_entry(area->free_list[migratetype].list.next,
 							struct page, lru);
-		rmqueue_del_from_freelist(page, &area->free_list[migratetype]);
+		rmqueue_del_from_freelist(page, &area->free_list[migratetype],
+					  current_order);
 		rmv_page_order(page);
 		area->nr_free--;
 		expand(zone, page, order, current_order, area, migratetype);
@@ -1286,7 +1297,7 @@ int move_freepages(struct zone *zone,
 		old_mt = get_freepage_migratetype(page);
 		area = &zone->free_area[order];
 		move_page_freelist(page, &area->free_list[old_mt],
-				    &area->free_list[migratetype]);
+				    &area->free_list[migratetype], order);
 		set_freepage_migratetype(page, migratetype);
 		page += 1 << order;
 		pages_moved += 1 << order;
@@ -1406,7 +1417,8 @@ __rmqueue_fallback(struct zone *zone, int order, int start_migratetype)
 
 			/* Remove the page from the freelists */
 			mt = get_freepage_migratetype(page);
-			del_from_freelist(page, &area->free_list[mt]);
+			del_from_freelist(page, &area->free_list[mt],
+					  current_order);
 			rmv_page_order(page);
 
 			/*
@@ -1767,7 +1779,7 @@ static int __isolate_free_page(struct page *page, unsigned int order)
 
 	/* Remove page from free list */
 	mt = get_freepage_migratetype(page);
-	del_from_freelist(page, &zone->free_area[order].free_list[mt]);
+	del_from_freelist(page, &zone->free_area[order].free_list[mt], order);
 	zone->free_area[order].nr_free--;
 	rmv_page_order(page);
 
@@ -5204,6 +5216,22 @@ static void __meminit init_node_memory_regions(struct pglist_data *pgdat)
 	pgdat->nr_node_regions = idx;
 }
 
+static void __meminit zone_init_free_lists_late(struct zone *zone)
+{
+	struct mem_region_list *mr_list;
+	int order, t, i;
+
+	for_each_migratetype_order(order, t) {
+		for (i = 0; i < zone->nr_zone_regions; i++) {
+			mr_list =
+				&zone->free_area[order].free_list[t].mr_list[i];
+
+			mr_list->nr_free = 0;
+			mr_list->zone_region = &zone->zone_regions[i];
+		}
+	}
+}
+
 /*
  * Zone-region indices are used to map node-memory-regions to
  * zone-memory-regions. Initialize all of them to an invalid value (-1),
@@ -5271,6 +5299,8 @@ static void __meminit init_zone_memory_regions(struct pglist_data *pgdat)
 		}
 
 		z->nr_zone_regions = idx;
+
+		zone_init_free_lists_late(z);
 
 		/*
 		 * Revisit the last visited node memory region, in case it
@@ -6795,7 +6825,8 @@ __offline_isolated_pages(unsigned long start_pfn, unsigned long end_pfn)
 		       pfn, 1 << order, end_pfn);
 #endif
 		mt = get_freepage_migratetype(page);
-		del_from_freelist(page, &zone->free_area[order].free_list[mt]);
+		del_from_freelist(page, &zone->free_area[order].free_list[mt],
+				  order);
 		rmv_page_order(page);
 		zone->free_area[order].nr_free--;
 		for (i = 0; i < (1 << order); i++)
