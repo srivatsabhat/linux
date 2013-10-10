@@ -823,6 +823,87 @@ static isolate_migrate_t isolate_migratepages(struct zone *zone,
 	return ISOLATE_SUCCESS;
 }
 
+/*
+ * Make free pages available within the given range, using compaction to
+ * migrate used pages elsewhere.
+ *
+ * [start, end) must belong to a single zone.
+ *
+ * This function is roughly based on the logic inside compact_zone().
+ */
+int compact_range(struct compact_control *cc, struct aggression_control *ac,
+		  struct free_page_control *fc, unsigned long start,
+		  unsigned long end)
+{
+	unsigned long pfn = start;
+	int ret = 0, tries, migrate_mode;
+
+	if (ac->prep_all)
+		migrate_prep();
+	else
+		migrate_prep_local();
+
+	while (pfn < end || !list_empty(&cc->migratepages)) {
+		if (list_empty(&cc->migratepages)) {
+			cc->nr_migratepages = 0;
+			pfn = isolate_migratepages_range(cc->zone, cc,
+					pfn, end, ac->isolate_unevictable);
+
+			if (!pfn) {
+				ret = -EINTR;
+				break;
+			}
+		}
+
+		for (tries = 0; tries < ac->max_tries; tries++) {
+			unsigned long nr_migrate, nr_remaining;
+
+			if (fatal_signal_pending(current)){
+				ret = -EINTR;
+				goto out;
+			}
+
+			if (ac->reclaim_clean) {
+				int nr_reclaimed;
+
+				nr_reclaimed =
+					reclaim_clean_pages_from_list(cc->zone,
+							&cc->migratepages);
+
+				cc->nr_migratepages -= nr_reclaimed;
+			}
+
+			migrate_mode = cc->sync ? MIGRATE_SYNC : MIGRATE_ASYNC;
+			nr_migrate = cc->nr_migratepages;
+			ret = migrate_pages(&cc->migratepages,
+					    fc->free_page_alloc, fc->alloc_data,
+					    migrate_mode, ac->reason);
+
+			update_nr_listpages(cc);
+			nr_remaining = cc->nr_migratepages;
+			trace_mm_compaction_migratepages(
+				nr_migrate - nr_remaining, nr_remaining);
+		}
+
+		if (tries == ac->max_tries) {
+			ret = ret < 0 ? ret : -EBUSY;
+			break;
+		}
+	}
+
+out:
+	if (ret < 0)
+		putback_movable_pages(&cc->migratepages);
+
+	/* Release free pages and check accounting */
+	if (fc->release_freepages)
+		cc->nr_freepages -= fc->release_freepages(fc->free_data);
+
+	VM_BUG_ON(cc->nr_freepages != 0);
+
+	return ret;
+}
+
 static int compact_finished(struct zone *zone,
 			    struct compact_control *cc)
 {
