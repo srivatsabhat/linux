@@ -919,6 +919,26 @@ static void move_page_freelist(struct page *page, struct free_list *old_list,
 	add_to_freelist(page, new_list, order);
 }
 
+/* Add pages from the given buddy freelist to the region allocator */
+static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
+				    int region_id)
+{
+	struct region_allocator *reg_alloc;
+	struct list_head *ralloc_list;
+	int order;
+
+	if (WARN_ON(list_empty(&free_list->list)))
+		return;
+
+	order = page_order(list_first_entry(&free_list->list,
+					    struct page, lru));
+
+	reg_alloc = &z->region_allocator;
+	ralloc_list = &reg_alloc->region[region_id].region_area[order].list;
+
+	del_from_freelist_bulk(ralloc_list, free_list, order, region_id);
+}
+
 /*
  * Freeing function for a buddy system allocator.
  *
