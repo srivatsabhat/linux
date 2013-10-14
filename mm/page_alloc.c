@@ -648,9 +648,11 @@ static inline int region_is_evac_candidate(struct zone *z,
 	if (system_state != SYSTEM_RUNNING)
 		return 0;
 
+#if 0
 	/* Don't bother evacuating regions in ZONE_DMA */
 	if (zone_idx(z) == ZONE_DMA)
 		return 0;
+#endif
 
 	/*
 	 * Don't try evacuations in regions not containing MOVABLE or
