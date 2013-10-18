@@ -671,6 +671,8 @@ static inline int can_return_region(struct mem_region_list *region, int order,
 	struct zone_mem_region *zone_region;
 	struct page *prev_page, *next_page;
 
+	return 0; /* switch off the region allocator */
+
 	zone_region = region->zone_region;
 
 	if (likely(zone_region->nr_free != zone_region->present_pages))
