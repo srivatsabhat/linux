@@ -843,6 +843,61 @@ page_found:
 	}
 }
 
+/*
+ * Delete all freepages belonging to the region 'region_id' from 'free_list'
+ * and move them to 'list'. Using suitable list-manipulation tricks, we move
+ * the pages between the lists in one shot.
+ */
+static void del_from_freelist_bulk(struct list_head *list,
+				   struct free_list *free_list, int order,
+				   int region_id)
+{
+	struct mem_region_list *region, *prev_region;
+	unsigned long nr_pages = 0;
+	struct free_area *area;
+	struct list_head *cur;
+	struct page *page;
+	int prev_region_id;
+
+	region = &free_list->mr_list[region_id];
+
+	/*
+	 * Perform bulk movement of all pages of the region to the new list,
+	 * except the page pointed to by region->pageblock.
+	 */
+	prev_region_id = find_prev_region(region_id, free_list);
+	if (prev_region_id < 0) {
+		/* This is the first region on the list */
+		list_cut_position(list, &free_list->list,
+				  region->page_block->prev);
+	} else {
+		prev_region = &free_list->mr_list[prev_region_id];
+		list_cut_position(list, prev_region->page_block,
+				  region->page_block->prev);
+	}
+
+	list_for_each(cur, list)
+		nr_pages++;
+
+	region->nr_free -= nr_pages;
+
+	/*
+	 * Now delete the page pointed to by region->page_block using
+	 * del_from_freelist(), so that it sets up the region related
+	 * data-structures of the freelist properly.
+	 */
+	page = list_entry(region->page_block, struct page, lru);
+	del_from_freelist(page, free_list, order);
+
+	list_add_tail(&page->lru, list);
+
+	area = &(page_zone(page)->free_area[order]);
+	area->nr_free -= nr_pages + 1;
+
+	/* Fix up the zone region stats, since del_from_freelist() altered it */
+	region->zone_region->nr_free += 1 << order;
+}
+
 /**
  * Move a given page from one freelist to another.
  */
