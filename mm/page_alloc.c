@@ -682,6 +682,52 @@ out:
 	set_region_bit(region_id, free_list);
 }
 
+/*
+ * Add all the freepages contained in 'list' to the buddy freelist
+ * 'free_list'. Using suitable list-manipulation tricks, we move the
+ * pages between the lists in one shot.
+ */
+static void add_to_freelist_bulk(struct list_head *list,
+				 struct free_list *free_list, int order,
+				 int region_id)
+{
+	struct list_head *cur, *position;
+	struct mem_region_list *region;
+	unsigned long nr_pages = 0;
+	struct free_area *area;
+	struct page *page;
+
+	if (list_empty(list))
+		return;
+
+	page = list_first_entry(list, struct page, lru);
+	list_del(&page->lru);
+
+	/*
+	 * Add one page using add_to_freelist() so that it sets up the
+	 * region related data-structures of the freelist properly.
+	 */
+	add_to_freelist(page, free_list, order);
+
+	/* Now add the rest of the pages in bulk */
+	list_for_each(cur, list)
+		nr_pages++;
+
+	position = free_list->mr_list[region_id].page_block;
+	list_splice_tail(list, position);
+
+
+	/* Update the statistics */
+	region = &free_list->mr_list[region_id];
+	region->nr_free += nr_pages;
+
+	area = &(page_zone(page)->free_area[order]);
+	area->nr_free += nr_pages + 1;
+
+	/* Fix up the zone region stats, since add_to_freelist() altered it */
+	region->zone_region->nr_free -= 1 << order;
+}
+
 /**
  * __rmqueue_smallest() *always* deletes elements from the head of the
  * list. Use this knowledge to keep page allocation fast, despite being
