@@ -686,10 +686,12 @@ out:
  * Add all the freepages contained in 'list' to the buddy freelist
  * 'free_list'. Using suitable list-manipulation tricks, we move the
  * pages between the lists in one shot.
+ *
+ * Returns the number of pages moved.
  */
-static void add_to_freelist_bulk(struct list_head *list,
-				 struct free_list *free_list, int order,
-				 int region_id)
+static unsigned long
+add_to_freelist_bulk(struct list_head *list, struct free_list *free_list,
+		     int order, int region_id)
 {
 	struct list_head *cur, *position;
 	struct mem_region_list *region;
@@ -698,7 +700,7 @@ static void add_to_freelist_bulk(struct list_head *list,
 	struct page *page;
 
 	if (list_empty(list))
-		return;
+		return 0;
 
 	page = list_first_entry(list, struct page, lru);
 	list_del(&page->lru);
@@ -726,6 +728,8 @@ static void add_to_freelist_bulk(struct list_head *list,
 
 	/* Fix up the zone region stats, since add_to_freelist() altered it */
 	region->zone_region->nr_free -= 1 << order;
+
+	return nr_pages + 1;
 }
 
 /**
@@ -847,10 +851,12 @@ page_found:
  * Delete all freepages belonging to the region 'region_id' from 'free_list'
  * and move them to 'list'. Using suitable list-manipulation tricks, we move
  * the pages between the lists in one shot.
+ *
+ * Returns the number of pages moved.
  */
-static void del_from_freelist_bulk(struct list_head *list,
-				   struct free_list *free_list, int order,
-				   int region_id)
+static unsigned long
+del_from_freelist_bulk(struct list_head *list, struct free_list *free_list,
+		       int order, int region_id)
 {
 	struct mem_region_list *region, *prev_region;
 	unsigned long nr_pages = 0;
@@ -896,6 +902,8 @@ static void del_from_freelist_bulk(struct list_head *list,
 
 	/* Fix up the zone region stats, since del_from_freelist() altered it */
 	region->zone_region->nr_free += 1 << order;
+
+	return nr_pages + 1;
 }
 
 /**
@@ -913,7 +921,9 @@ static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
 				    int region_id)
 {
 	struct region_allocator *reg_alloc;
+	struct free_area_region *reg_area;
 	struct list_head *ralloc_list;
+	unsigned long nr_pages;
 	int order;
 
 	if (WARN_ON(list_empty(&free_list->list)))
@@ -923,9 +933,14 @@ static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
 					    struct page, lru));
 
 	reg_alloc = &z->region_allocator;
-	ralloc_list = &reg_alloc->region[region_id].region_area[order].list;
+	reg_area = &reg_alloc->region[region_id].region_area[order];
+	ralloc_list = &reg_area->list;
 
-	del_from_freelist_bulk(ralloc_list, free_list, order, region_id);
+	nr_pages = del_from_freelist_bulk(ralloc_list, free_list, order,
+					  region_id);
+
+	WARN_ON(reg_area->nr_free != 0);
+	reg_area->nr_free += nr_pages;
 }
 
 /* Delete freepages from the region allocator and add them to buddy freelists */
@@ -933,8 +948,10 @@ static int del_from_region_allocator(struct zone *zone, unsigned int order,
 				     int migratetype)
 {
 	struct region_allocator *reg_alloc;
+	struct free_area_region *reg_area;
 	struct list_head *ralloc_list;
 	struct free_list *free_list;
+	unsigned long nr_pages;
 	int next_region;
 
 	reg_alloc = &zone->region_allocator;
@@ -943,10 +960,16 @@ static int del_from_region_allocator(struct zone *zone, unsigned int order,
 	if (next_region < 0)
 		return -ENOMEM;
 
-	ralloc_list = &reg_alloc->region[next_region].region_area[order].list;
+	reg_area = &reg_alloc->region[next_region].region_area[order];
+	ralloc_list = &reg_area->list;
+
 	free_list = &zone->free_area[order].free_list[migratetype];
 
-	add_to_freelist_bulk(ralloc_list, free_list, order, next_region);
+	nr_pages = add_to_freelist_bulk(ralloc_list, free_list, order,
+					next_region);
+
+	reg_area->nr_free -= nr_pages;
+	WARN_ON(reg_area->nr_free != 0);
 
 	return 0;
 }
