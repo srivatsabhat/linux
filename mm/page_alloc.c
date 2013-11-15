@@ -629,9 +629,11 @@ static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
 				    int region_id);
 
 
-static inline int can_return_region(struct mem_region_list *region, int order)
+static inline int can_return_region(struct mem_region_list *region, int order,
+				    struct free_list *free_list)
 {
 	struct zone_mem_region *zone_region;
+	struct page *prev_page, *next_page;
 
 	zone_region = region->zone_region;
 
@@ -648,6 +650,16 @@ static inline int can_return_region(struct mem_region_list *region, int order)
 	 */
 	if (likely(order != MAX_ORDER-1))
 		return 0;
+
+	/*
+	 * Don't return all the regions; retain atleast one region as a
+	 * cache for future use.
+	 */
+	prev_page = container_of(free_list->list.prev , struct page, lru);
+	next_page = container_of(free_list->list.next , struct page, lru);
+
+	if (page_zone_region_id(prev_page) == page_zone_region_id(next_page))
+		return 0; /* There is only one region in this freelist */
 
 	if (region->nr_free * (1 << order) != zone_region->nr_free)
 		return 0;
@@ -718,7 +730,7 @@ try_return_region:
 	 * Try to return the freepages of a memory region to the region
 	 * allocator, if possible.
 	 */
-	if (can_return_region(region, order))
+	if (can_return_region(region, order, free_list))
 		add_to_region_allocator(page_zone(page), free_list, region_id);
 }
 
