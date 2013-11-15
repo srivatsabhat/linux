@@ -628,6 +628,29 @@ out:
 static void add_to_region_allocator(struct zone *z, struct free_list *free_list,
 				    int region_id);
 
+static inline int region_is_evac_candidate(struct zone *z,
+					   struct zone_mem_region *region,
+					   int migratetype)
+{
+
+	/* Don't start evacuation too early during boot */
+	if (system_state != SYSTEM_RUNNING)
+		return 0;
+
+	/* Don't bother evacuating regions in ZONE_DMA */
+	if (zone_idx(z) == ZONE_DMA)
+		return 0;
+
+	/*
+	 * Don't try evacuations in regions not containing MOVABLE or
+	 * RECLAIMABLE allocations.
+	 */
+	if (!(migratetype == MIGRATE_MOVABLE ||
+		migratetype == MIGRATE_RECLAIMABLE))
+		return 0;
+
+	return should_evacuate_region(z, region);
+}
 
 static inline int can_return_region(struct mem_region_list *region, int order,
 				    struct free_list *free_list)
@@ -672,7 +695,9 @@ static void add_to_freelist(struct page *page, struct free_list *free_list,
 {
 	struct list_head *prev_region_list, *lru;
 	struct mem_region_list *region;
-	int region_id, prev_region_id;
+	int region_id, prev_region_id, migratetype;
+	struct zone *zone;
+	struct pglist_data *pgdat;
 
 	lru = &page->lru;
 	region_id = page_zone_region_id(page);
@@ -730,8 +755,17 @@ try_return_region:
 	 * Try to return the freepages of a memory region to the region
 	 * allocator, if possible.
 	 */
-	if (can_return_region(region, order, free_list))
+	if (can_return_region(region, order, free_list)) {
 		add_to_region_allocator(page_zone(page), free_list, region_id);
+		return;
+	}
+
+	zone = page_zone(page);
+	migratetype = get_pageblock_migratetype(page);
+	pgdat = NODE_DATA(page_to_nid(page));
+
+	if (region_is_evac_candidate(zone, region->zone_region, migratetype))
+		queue_mempower_work(pgdat, zone, region_id);
 }
 
 /*
