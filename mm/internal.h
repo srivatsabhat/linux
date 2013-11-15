@@ -110,6 +110,42 @@ extern bool is_free_buddy_page(struct page *page);
 /*
  * in mm/compaction.c
  */
+
+struct free_page_control {
+
+	/* Function used to allocate free pages as target of migration. */
+	struct page * (*free_page_alloc)(struct page *migratepage,
+					 unsigned long data,
+					 int **result);
+
+	unsigned long alloc_data;	/* Private data for free_page_alloc() */
+
+	/*
+	 * Function to release the accumulated free pages after the compaction
+	 * run.
+	 */
+	unsigned long (*release_freepages)(unsigned long info);
+	unsigned long free_data;	/* Private data for release_freepages() */
+};
+
+/*
+ * aggression_control gives us fine-grained control to specify how aggressively
+ * we want to compact memory.
+ */
+struct aggression_control {
+	bool isolate_unevictable;	/* Isolate unevictable pages too */
+	bool prep_all;			/* Use migrate_prep() instead of
+					 * migrate_prep_local().
+					 */
+	bool reclaim_clean;		/* Reclaim clean page-cache pages */
+	int max_tries;			/* No. of tries to migrate the
+					 * isolated pages before giving up.
+					 */
+	int reason;			/* Reason for compaction, passed on
+					 * as reason for migrate_pages().
+					 */
+};
+
 /*
  * compact_control is used to track pages being migrated and the free pages
  * they are being migrated to during memory compaction. The free_pfn starts
@@ -143,6 +179,10 @@ isolate_freepages_range(struct compact_control *cc,
 unsigned long
 isolate_migratepages_range(struct zone *zone, struct compact_control *cc,
 	unsigned long low_pfn, unsigned long end_pfn, bool unevictable);
+
+int compact_range(struct compact_control *cc, struct aggression_control *ac,
+		  struct free_page_control *fc, unsigned long start,
+		  unsigned long end);
 
 #endif
 
