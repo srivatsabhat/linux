@@ -755,6 +755,30 @@ static inline void set_page_links(struct page *page, enum zone_type zone,
 #endif
 }
 
+static inline int page_node_region_id(const struct page *page,
+				      const pg_data_t *pgdat)
+{
+	return (page_to_pfn(page) - pgdat->node_start_pfn) >> MEM_REGION_SHIFT;
+}
+
+/**
+ * Return the index of the zone memory region to which the page belongs.
+ *
+ * Given a page, find the absolute (node) memory region as well as the zone to
+ * which it belongs. Then find the region within the zone that corresponds to
+ * that node memory region, and return its index.
+ */
+static inline int page_zone_region_id(const struct page *page)
+{
+	pg_data_t *pgdat = NODE_DATA(page_to_nid(page));
+	enum zone_type z_num = page_zonenum(page);
+	unsigned long node_region_idx;
+
+	node_region_idx = page_node_region_id(page, pgdat);
+
+	return pgdat->node_regions[node_region_idx].zone_region_idx[z_num];
+}
+
 /*
  * Some inline functions in vmstat.h depend on page_zone()
  */
