@@ -184,6 +184,9 @@ int compact_range(struct compact_control *cc, struct aggression_control *ac,
 		  struct free_page_control *fc, unsigned long start,
 		  unsigned long end);
 
+void queue_mempower_work(struct pglist_data *pgdat, struct zone *zone,
+			 int region_id);
+
 #endif
 
 /*
