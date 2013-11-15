@@ -1649,14 +1649,16 @@ static void change_pageblock_range(struct page *pageblock_page,
 /*
  * If breaking a large block of pages, move all free pages to the preferred
  * allocation list. If falling back for a reclaimable kernel allocation, be
- * more aggressive about taking ownership of free pages.
+ * more aggressive about borrowing the free pages.
  *
- * On the other hand, never change migration type of MIGRATE_CMA pageblocks
- * nor move CMA pages to different free lists. We don't want unmovable pages
- * to be allocated from MIGRATE_CMA areas.
+ * On the other hand, never move CMA pages to different free lists. We don't
+ * want unmovable pages to be allocated from MIGRATE_CMA areas.
  *
- * Returns the new migratetype of the pageblock (or the same old migratetype
- * if it was unchanged).
+ * Also, we *NEVER* change the pageblock migratetype of any block of memory.
+ * (IOW, we only try to _loan_ the freepages from a fallback list, but never
+ * try to _own_ them.)
+ *
+ * Returns the migratetype of the fallback list.
  */
 static int try_to_steal_freepages(struct zone *zone, struct page *page,
 				  int start_type, int fallback_type)
@@ -1666,28 +1668,10 @@ static int try_to_steal_freepages(struct zone *zone, struct page *page,
 	if (is_migrate_cma(fallback_type))
 		return fallback_type;
 
-	/* Take ownership for orders >= pageblock_order */
-	if (current_order >= pageblock_order) {
-		change_pageblock_range(page, current_order, start_type);
-		return start_type;
-	}
-
 	if (current_order >= pageblock_order / 2 ||
 	    start_type == MIGRATE_RECLAIMABLE ||
-	    page_group_by_mobility_disabled) {
-		int pages;
-
-		pages = move_freepages_block(zone, page, start_type);
-
-		/* Claim the whole block if over half of it is free */
-		if (pages >= (1 << (pageblock_order-1)) ||
-				page_group_by_mobility_disabled) {
-
-			set_pageblock_migratetype(page, start_type);
-			return start_type;
-		}
-
-	}
+	    page_group_by_mobility_disabled)
+		move_freepages_block(zone, page, start_type);
 
 	return fallback_type;
 }
