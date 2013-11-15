@@ -460,6 +460,7 @@ void put_pages_list(struct list_head *pages);
 
 void split_page(struct page *page, unsigned int order);
 int split_free_page(struct page *page);
+void __split_free_page(struct page *page, unsigned int order);
 
 /*
  * Compound pages have a destructor function.  Provide a
