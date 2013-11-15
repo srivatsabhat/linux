@@ -187,6 +187,8 @@ int compact_range(struct compact_control *cc, struct aggression_control *ac,
 void queue_mempower_work(struct pglist_data *pgdat, struct zone *zone,
 			 int region_id);
 
+int should_evacuate_region(struct zone *z, struct zone_mem_region *region);
+
 #endif
 
 /*
