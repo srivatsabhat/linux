@@ -10,6 +10,7 @@
 #include <linux/bitops.h>
 #include <linux/cache.h>
 #include <linux/threads.h>
+#include <linux/kthread-work.h>
 #include <linux/numa.h>
 #include <linux/init.h>
 #include <linux/seqlock.h>
@@ -126,6 +127,13 @@ struct region_allocator {
 	struct mem_region	region[MAX_NR_ZONE_REGIONS];
 	int			next_region;
 	DECLARE_BITMAP(ralloc_mask, MAX_NR_ZONE_REGIONS);
+};
+
+struct mempower_work {
+	spinlock_t		lock;
+	DECLARE_BITMAP(mempower_mask, MAX_NR_ZONE_REGIONS);
+
+	struct kthread_work	work;
 };
 
 struct pglist_data;
@@ -460,6 +468,7 @@ struct zone {
 	 */
 	unsigned int inactive_ratio;
 
+	struct mempower_work	mempower_work;
 
 	ZONE_PADDING(_pad2_)
 	/* Rarely used or read-mostly fields */
@@ -804,6 +813,7 @@ typedef struct pglist_data {
 	struct task_struct *kswapd;	/* Protected by lock_memory_hotplug() */
 	int kswapd_max_order;
 	enum zone_type classzone_idx;
+	struct kthread_worker mempower_worker;
 #ifdef CONFIG_NUMA_BALANCING
 	/*
 	 * Lock serializing the per destination node AutoNUMA memory
