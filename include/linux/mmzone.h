@@ -38,6 +38,9 @@
 /* Max no. of memory regions per node */
 #define MAX_NR_NODE_REGIONS	512
 
+/* Max no. of memory regions per zone */
+#define MAX_NR_ZONE_REGIONS	MAX_NR_NODE_REGIONS
+
 enum {
 	MIGRATE_UNMOVABLE,
 	MIGRATE_RECLAIMABLE,
@@ -314,6 +317,13 @@ enum zone_type {
 
 #ifndef __GENERATING_BOUNDS_H
 
+struct zone_mem_region {
+	unsigned long start_pfn;
+	unsigned long end_pfn;
+	unsigned long present_pages;
+	unsigned long spanned_pages;
+};
+
 struct zone {
 	/* Fields commonly accessed by the page allocator */
 
@@ -369,6 +379,9 @@ struct zone {
 	seqlock_t		span_seqlock;
 #endif
 	struct free_area	free_area[MAX_ORDER];
+
+	struct zone_mem_region	zone_regions[MAX_NR_ZONE_REGIONS];
+	int 			nr_zone_regions;
 
 #ifndef CONFIG_SPARSEMEM
 	/*
